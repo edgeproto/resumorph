@@ -1,7 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { ChatMessage } from "../components/ChatUI";
 import { ExportDialog } from "../components/ExportDialog";
-import { PromptEditor } from "../components/PromptEditor";
+import { JobDescriptionInput } from "../components/JobDescriptionInput";
 import { ResumePreview } from "../components/ResumePreview";
 import { api, parseProfileResume } from "../lib/api";
 import { parseTailoredJson, type TailoredResume } from "../lib/docx";
@@ -12,17 +14,16 @@ import {
   interpolatePrompt,
 } from "../lib/prompts";
 import { modelForProvider, useAppSettings } from "../lib/settings";
-import type { LlmProviderId, PromptPreset } from "../lib/types";
+import type { LlmProviderId, ParsedJobDescription } from "../lib/types";
 
 export function Tailor() {
   const queryClient = useQueryClient();
   const { data: settings } = useAppSettings();
+  const [searchParams] = useSearchParams();
 
   const [profileId, setProfileId] = useState("");
-  const [sessionId, setSessionId] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [company, setCompany] = useState("");
-  const [jobDescription, setJobDescription] = useState("");
+  const [sessionId, setSessionId] = useState(searchParams.get("session") ?? "");
+  const [jd, setJd] = useState<ParsedJobDescription | null>(null);
   const [provider, setProvider] = useState<LlmProviderId>("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-20250514");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -33,7 +34,6 @@ export function Tailor() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
-  const [showPromptEditor, setShowPromptEditor] = useState(false);
 
   const { data: profiles = [] } = useQuery({
     queryKey: ["profiles"],
@@ -45,10 +45,10 @@ export function Tailor() {
     queryFn: api.listPromptPresets,
   });
 
-  const { data: sessions = [] } = useQuery({
-    queryKey: ["sessions", profileId],
-    queryFn: () => api.listSessions(profileId),
-    enabled: !!profileId,
+  const { data: session } = useQuery({
+    queryKey: ["session", sessionId],
+    queryFn: () => api.getSession(sessionId),
+    enabled: !!sessionId,
   });
 
   const tailorPresets = presets.filter((p) => p.mode === "tailor");
@@ -73,31 +73,22 @@ export function Tailor() {
     }
   }, [presets, selectedPresetId]);
 
-  const savePresetMutation = useMutation({
-    mutationFn: () => {
-      const preset = presets.find((p) => p.id === selectedPresetId);
-      if (!preset) throw new Error("No preset selected");
-      return api.updatePromptPreset({
-        id: preset.id,
-        systemPrompt,
-        userPrompt,
-      });
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["promptPresets"] }),
-  });
-
-  function loadSession(id: string) {
-    const session = sessions.find((s) => s.id === id);
-    if (!session) return;
-    setSessionId(session.id);
-    setJobDescription(session.jobDescription ?? "");
-    setJobTitle(session.jobTitle ?? "");
-    setCompany(session.company ?? "");
-  }
+  useEffect(() => {
+    if (session) {
+      setProfileId(session.profileId);
+      if (session.jobDescription) {
+        setJd({
+          text: session.jobDescription,
+          jobTitle: session.jobTitle,
+          company: session.company,
+          sourceType: "text",
+        });
+      }
+    }
+  }, [session]);
 
   async function handleTailor() {
-    if (!profileId || !jobDescription.trim() || !parsed) return;
+    if (!profileId || !jd?.text.trim() || !parsed) return;
 
     setLoading(true);
     setError(null);
@@ -109,18 +100,18 @@ export function Tailor() {
       if (!activeSessionId) {
         const session = await api.createSession({
           profileId,
-          jobDescription,
-          jobTitle: jobTitle || undefined,
-          company: company || undefined,
+          jobDescription: jd.text,
+          jobTitle: jd.jobTitle ?? undefined,
+          company: jd.company ?? undefined,
         });
         activeSessionId = session.id;
         setSessionId(session.id);
-        queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
       } else {
         await api.updateSession(activeSessionId, {
-          jobDescription,
-          jobTitle: jobTitle || undefined,
-          company: company || undefined,
+          jobDescription: jd.text,
+          jobTitle: jd.jobTitle ?? undefined,
+          company: jd.company ?? undefined,
         });
       }
 
@@ -136,9 +127,9 @@ export function Tailor() {
       }
 
       const context = buildPromptContext(parsed, selectedProfile?.name ?? "", {
-        jobDescription,
-        jobTitle,
-        company,
+        jobDescription: jd.text,
+        jobTitle: jd.jobTitle ?? "",
+        company: jd.company ?? "",
         placeholderKeys,
       });
 
@@ -154,8 +145,7 @@ export function Tailor() {
           model,
           jsonMode: true,
           temperature: settings?.temperature,
-          baseUrl:
-            provider === "custom" ? settings?.customBaseUrl : undefined,
+          baseUrl: provider === "custom" ? settings?.customBaseUrl : undefined,
         },
       );
 
@@ -175,197 +165,121 @@ export function Tailor() {
     }
   }
 
-  function handlePresetChange(id: string) {
-    setSelectedPresetId(id);
-    const preset = presets.find((p) => p.id === id);
-    if (preset) {
-      setSystemPrompt(preset.systemPrompt);
-      setUserPrompt(preset.userPrompt);
-    }
-  }
+  const canTailor = !!profileId && !!jd?.text.trim() && !!parsed && !loading;
 
   return (
-    <div className="page">
-      <header className="page-header">
-        <h2>Tailor</h2>
-        <p>Paste a job description, edit prompts, and generate a tailored resume.</p>
+    <div className="gpt-page">
+      <header className="gpt-topbar">
+        <select
+          className="gpt-select"
+          value={profileId}
+          onChange={(e) => {
+            setProfileId(e.target.value);
+            setSessionId("");
+            setTailored(null);
+            setTailoredRaw(null);
+          }}
+        >
+          <option value="">Select profile...</option>
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="gpt-select gpt-select-sm"
+          value={selectedPresetId}
+          onChange={(e) => setSelectedPresetId(e.target.value)}
+        >
+          {tailorPresets.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        {jd && <JobDescriptionInput value={jd} onChange={setJd} compact />}
       </header>
 
-      <section className="card">
-        <div className="form-row">
-          <label>
-            Profile
-            <select
-              value={profileId}
-              onChange={(e) => {
-                setProfileId(e.target.value);
-                setSessionId("");
-              }}
-            >
-              <option value="">Select a profile...</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.sourceType})
-                </option>
-              ))}
-            </select>
-          </label>
+      <div className="gpt-thread">
+        {!jd && (
+          <div className="gpt-empty">
+            <h1>Tailor your resume</h1>
+            <p className="muted">
+              Upload the full job description — we&apos;ll detect the role and
+              company automatically.
+            </p>
+            <div className="gpt-empty-jd">
+              <JobDescriptionInput value={jd} onChange={setJd} />
+            </div>
+          </div>
+        )}
 
-          {profileId && sessions.length > 0 && (
-            <label>
-              Previous session
-              <select
-                value={sessionId}
-                onChange={(e) => loadSession(e.target.value)}
+        {jd && !tailored && !loading && (
+          <div className="gpt-empty">
+            <h1>
+              {jd.jobTitle ?? "Ready to tailor"}
+              {jd.company ? ` at ${jd.company}` : ""}
+            </h1>
+            <p className="muted">
+              {profileId
+                ? "Click below to generate a tailored resume for this role."
+                : "Select a profile above to continue."}
+            </p>
+            {!parsed && profileId && (
+              <p className="error">This profile has no uploaded resume.</p>
+            )}
+          </div>
+        )}
+
+        {loading && (
+          <ChatMessage role="assistant" content="">
+            <span className="gpt-typing">Tailoring your resume...</span>
+          </ChatMessage>
+        )}
+
+        {tailored && (
+          <ChatMessage role="assistant" content="Here's your tailored resume:">
+            <ResumePreview
+              original={parsed}
+              tailored={tailored}
+              tailoredRaw={tailoredRaw}
+            />
+            <div className="button-row mt">
+              <button type="button" onClick={() => setShowExport(true)}>
+                Export resume
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  setTailored(null);
+                  setTailoredRaw(null);
+                }}
               >
-                <option value="">New session</option>
-                {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.jobTitle || s.company || "Session"}{" "}
-                    {new Date(s.createdAt).toLocaleDateString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-
-        <div className="form-row">
-          <label>
-            Job title
-            <input
-              type="text"
-              value={jobTitle}
-              onChange={(e) => setJobTitle(e.target.value)}
-              placeholder="Software Engineer"
-            />
-          </label>
-          <label>
-            Company
-            <input
-              type="text"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-              placeholder="Acme Corp"
-            />
-          </label>
-        </div>
-
-        <div className="form-row">
-          <label>
-            Provider
-            <select
-              value={provider}
-              onChange={(e) => {
-                const p = e.target.value as LlmProviderId;
-                setProvider(p);
-                if (settings) setModel(modelForProvider(settings, p));
-              }}
-            >
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-              <option value="custom">Custom (OpenAI-compatible)</option>
-            </select>
-          </label>
-          <label>
-            Model
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            />
-          </label>
-          <label>
-            Prompt preset
-            <select
-              value={selectedPresetId}
-              onChange={(e) => handlePresetChange(e.target.value)}
-            >
-              {tailorPresets.map((p: PromptPreset) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.isDefault ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <label>
-          Job description
-          <textarea
-            rows={8}
-            value={jobDescription}
-            onChange={(e) => setJobDescription(e.target.value)}
-            placeholder="Paste the full job description here..."
-          />
-        </label>
-
-        <div className="button-row">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setShowPromptEditor(!showPromptEditor)}
-          >
-            {showPromptEditor ? "Hide prompts" : "Edit prompts"}
-          </button>
-          {showPromptEditor && (
-            <button
-              type="button"
-              className="secondary"
-              disabled={savePresetMutation.isPending}
-              onClick={() => savePresetMutation.mutate()}
-            >
-              Save preset
-            </button>
-          )}
-        </div>
-
-        {showPromptEditor && (
-          <PromptEditor
-            mode="tailor"
-            systemPrompt={systemPrompt}
-            userPrompt={userPrompt}
-            onSystemChange={setSystemPrompt}
-            onUserChange={setUserPrompt}
-          />
+                Tailor again
+              </button>
+            </div>
+          </ChatMessage>
         )}
 
-        <div className="button-row mt">
-          <button
-            type="button"
-            onClick={handleTailor}
-            disabled={loading || !profileId || !parsed || !jobDescription.trim()}
-          >
-            {loading ? "Tailoring..." : "Tailor resume"}
-          </button>
-          {tailored && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setShowExport(true)}
-            >
-              Export
-            </button>
-          )}
-        </div>
-
-        {!parsed && profileId && (
-          <p className="error">Selected profile has no uploaded resume.</p>
-        )}
         {error && <p className="error">{error}</p>}
-      </section>
+      </div>
 
-      {(parsed || tailored) && (
-        <section className="card">
-          <h3>Preview</h3>
-          <ResumePreview
-            original={parsed}
-            tailored={tailored}
-            tailoredRaw={tailoredRaw}
-          />
-        </section>
-      )}
+      <div className="gpt-bottom">
+        {jd && (
+          <div className="gpt-tailor-actions">
+            <button
+              type="button"
+              className="gpt-tailor-btn"
+              onClick={handleTailor}
+              disabled={!canTailor}
+            >
+              {loading ? "Tailoring..." : "Tailor resume"}
+            </button>
+          </div>
+        )}
+      </div>
 
       {showExport && tailored && profileId && (
         <ExportDialog

@@ -1,6 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { PromptEditor } from "../components/PromptEditor";
+import { useSearchParams } from "react-router-dom";
+import { ChatInputBar, ChatMessage } from "../components/ChatUI";
+import { JobDescriptionInput } from "../components/JobDescriptionInput";
 import { api, parseProfileResume } from "../lib/api";
 import { completeWithProvider } from "../lib/llm";
 import {
@@ -9,24 +11,22 @@ import {
   interpolatePrompt,
 } from "../lib/prompts";
 import { modelForProvider, useAppSettings } from "../lib/settings";
-import type { LlmProviderId, PromptPreset } from "../lib/types";
+import type { LlmProviderId, ParsedJobDescription } from "../lib/types";
 
 export function Chat() {
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { data: settings } = useAppSettings();
+  const [searchParams] = useSearchParams();
 
   const [profileId, setProfileId] = useState("");
-  const [sessionId, setSessionId] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [company, setCompany] = useState("");
-  const [jobDescription, setJobDescription] = useState("");
+  const [sessionId, setSessionId] = useState(searchParams.get("session") ?? "");
+  const [jd, setJd] = useState<ParsedJobDescription | null>(null);
   const [provider, setProvider] = useState<LlmProviderId>("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-20250514");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [userPrompt, setUserPrompt] = useState("");
   const [selectedPresetId, setSelectedPresetId] = useState("");
-  const [showPromptEditor, setShowPromptEditor] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,10 +41,10 @@ export function Chat() {
     queryFn: api.listPromptPresets,
   });
 
-  const { data: sessions = [] } = useQuery({
-    queryKey: ["sessions", profileId],
-    queryFn: () => api.listSessions(profileId),
-    enabled: !!profileId,
+  const { data: session } = useQuery({
+    queryKey: ["session", sessionId],
+    queryFn: () => api.getSession(sessionId),
+    enabled: !!sessionId,
   });
 
   const { data: messages = [] } = useQuery({
@@ -53,7 +53,6 @@ export function Chat() {
     enabled: !!sessionId,
   });
 
-  const qaPresets = presets.filter((p) => p.mode === "qa");
   const selectedProfile = profiles.find((p) => p.id === profileId);
   const parsed = selectedProfile ? parseProfileResume(selectedProfile) : null;
 
@@ -76,57 +75,43 @@ export function Chat() {
   }, [presets, selectedPresetId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const createSessionMutation = useMutation({
-    mutationFn: () =>
-      api.createSession({
-        profileId,
-        jobDescription: jobDescription || undefined,
-        jobTitle: jobTitle || undefined,
-        company: company || undefined,
-      }),
-    onSuccess: (session) => {
-      setSessionId(session.id);
-      queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
-    },
-  });
-
-  const savePresetMutation = useMutation({
-    mutationFn: () => {
-      const preset = presets.find((p) => p.id === selectedPresetId);
-      if (!preset) throw new Error("No preset selected");
-      return api.updatePromptPreset({
-        id: preset.id,
-        systemPrompt,
-        userPrompt,
-      });
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["promptPresets"] }),
-  });
-
-  function loadSession(id: string) {
-    const session = sessions.find((s) => s.id === id);
-    if (!session) return;
-    setSessionId(session.id);
-    setJobDescription(session.jobDescription ?? "");
-    setJobTitle(session.jobTitle ?? "");
-    setCompany(session.company ?? "");
-  }
-
-  function handlePresetChange(id: string) {
-    setSelectedPresetId(id);
-    const preset = presets.find((p) => p.id === id);
-    if (preset) {
-      setSystemPrompt(preset.systemPrompt);
-      setUserPrompt(preset.userPrompt);
+    if (session) {
+      setProfileId(session.profileId);
+      if (session.jobDescription) {
+        setJd({
+          text: session.jobDescription,
+          jobTitle: session.jobTitle,
+          company: session.company,
+          sourceType: "text",
+        });
+      }
     }
+  }, [session]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  async function ensureSession(): Promise<string> {
+    if (sessionId) return sessionId;
+    if (!profileId) throw new Error("Select a profile first");
+    const created = await api.createSession({
+      profileId,
+      jobDescription: jd?.text,
+      jobTitle: jd?.jobTitle ?? undefined,
+      company: jd?.company ?? undefined,
+    });
+    setSessionId(created.id);
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    return created.id;
   }
 
   async function handleSend() {
     if (!input.trim()) return;
+    if (!profileId) {
+      setError("Select a profile first");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -134,18 +119,14 @@ export function Chat() {
     setInput("");
 
     try {
-      let activeSessionId = sessionId;
-      if (!activeSessionId) {
-        if (!profileId) throw new Error("Select a profile first");
-        const session = await api.createSession({
-          profileId,
-          jobDescription: jobDescription || undefined,
-          jobTitle: jobTitle || undefined,
-          company: company || undefined,
+      const activeSessionId = await ensureSession();
+
+      if (jd) {
+        await api.updateSession(activeSessionId, {
+          jobDescription: jd.text,
+          jobTitle: jd.jobTitle ?? undefined,
+          company: jd.company ?? undefined,
         });
-        activeSessionId = session.id;
-        setSessionId(session.id);
-        queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
       }
 
       await api.createMessage({
@@ -153,14 +134,12 @@ export function Chat() {
         role: "user",
         content: question,
       });
-      queryClient.invalidateQueries({
-        queryKey: ["messages", activeSessionId],
-      });
+      queryClient.invalidateQueries({ queryKey: ["messages", activeSessionId] });
 
       const context = buildPromptContext(parsed, selectedProfile?.name ?? "", {
-        jobDescription,
-        jobTitle,
-        company,
+        jobDescription: jd?.text ?? "",
+        jobTitle: jd?.jobTitle ?? "",
+        company: jd?.company ?? "",
         userQuestion: question,
       });
 
@@ -175,8 +154,7 @@ export function Chat() {
         {
           model,
           temperature: settings?.temperature,
-          baseUrl:
-            provider === "custom" ? settings?.customBaseUrl : undefined,
+          baseUrl: provider === "custom" ? settings?.customBaseUrl : undefined,
         },
       );
 
@@ -185,9 +163,7 @@ export function Chat() {
         role: "assistant",
         content: response,
       });
-      queryClient.invalidateQueries({
-        queryKey: ["messages", activeSessionId],
-      });
+      queryClient.invalidateQueries({ queryKey: ["messages", activeSessionId] });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -195,201 +171,84 @@ export function Chat() {
     }
   }
 
+  const hasStarted = messages.length > 0;
+
   return (
-    <div className="page">
-      <header className="page-header">
-        <h2>Application Q&A</h2>
-        <p>Ask cover letter questions, gap analysis, and more.</p>
+    <div className="gpt-page">
+      <header className="gpt-topbar">
+        <select
+          className="gpt-select"
+          value={profileId}
+          onChange={(e) => {
+            setProfileId(e.target.value);
+            setSessionId("");
+            setJd(null);
+          }}
+        >
+          <option value="">Select profile...</option>
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        {jd && <JobDescriptionInput value={jd} onChange={setJd} compact />}
       </header>
 
-      <section className="card">
-        <div className="form-row">
-          <label>
-            Profile
-            <select
-              value={profileId}
-              onChange={(e) => {
-                setProfileId(e.target.value);
-                setSessionId("");
-              }}
-            >
-              <option value="">Select...</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {profileId && sessions.length > 0 && (
-            <label>
-              Session history
-              <select
-                value={sessionId}
-                onChange={(e) => loadSession(e.target.value)}
-              >
-                <option value="">New session</option>
-                {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.jobTitle || s.company || "Session"}{" "}
-                    {new Date(s.createdAt).toLocaleDateString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-
-        <div className="form-row">
-          <label>
-            Job title
-            <input
-              type="text"
-              value={jobTitle}
-              onChange={(e) => setJobTitle(e.target.value)}
-            />
-          </label>
-          <label>
-            Company
-            <input
-              type="text"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div className="form-row">
-          <label>
-            Provider
-            <select
-              value={provider}
-              onChange={(e) => {
-                const p = e.target.value as LlmProviderId;
-                setProvider(p);
-                if (settings) setModel(modelForProvider(settings, p));
-              }}
-            >
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <label>
-            Model
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            />
-          </label>
-          <label>
-            Prompt preset
-            <select
-              value={selectedPresetId}
-              onChange={(e) => handlePresetChange(e.target.value)}
-            >
-              {qaPresets.map((p: PromptPreset) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.isDefault ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <label>
-          Job description (context)
-          <textarea
-            rows={4}
-            value={jobDescription}
-            onChange={(e) => setJobDescription(e.target.value)}
-          />
-        </label>
-
-        <div className="button-row">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setShowPromptEditor(!showPromptEditor)}
-          >
-            {showPromptEditor ? "Hide prompts" : "Edit prompts"}
-          </button>
-          {showPromptEditor && (
-            <button
-              type="button"
-              className="secondary"
-              disabled={savePresetMutation.isPending}
-              onClick={() => savePresetMutation.mutate()}
-            >
-              Save preset
-            </button>
-          )}
-          {!sessionId && (
-            <button
-              type="button"
-              disabled={!profileId || createSessionMutation.isPending}
-              onClick={() => createSessionMutation.mutate()}
-            >
-              Start chat session
-            </button>
-          )}
-        </div>
-
-        {showPromptEditor && (
-          <PromptEditor
-            mode="qa"
-            systemPrompt={systemPrompt}
-            userPrompt={userPrompt}
-            onSystemChange={setSystemPrompt}
-            onUserChange={setUserPrompt}
-          />
-        )}
-      </section>
-
-      {(sessionId || profileId) && (
-        <section className="card chat-panel">
-          <div className="chat-messages">
-            {messages.length === 0 && (
-              <p className="muted">
-                Ask a question to get started — e.g. &quot;Write a cover
-                letter&quot; or &quot;What gaps should I address?&quot;
-              </p>
-            )}
-            {messages.map((m) => (
-              <div key={m.id} className={`chat-bubble ${m.role}`}>
-                <strong>{m.role}</strong>
-                <p>{m.content}</p>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
+      <div className="gpt-thread">
+        {!hasStarted && !jd && (
+          <div className="gpt-empty">
+            <h1>How can I help with your application?</h1>
+            <p className="muted">
+              Upload a job description, then ask about cover letters, interview
+              prep, or gaps to address.
+            </p>
+            <div className="gpt-empty-jd">
+              <JobDescriptionInput value={jd} onChange={setJd} />
+            </div>
           </div>
-          <form
-            className="chat-input"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-          >
-            <input
-              type="text"
-              placeholder="e.g. Write a cover letter..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={loading || !profileId}
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim() || !profileId}
-            >
-              Send
-            </button>
-          </form>
-          {error && <p className="error">{error}</p>}
-        </section>
-      )}
+        )}
+
+        {!hasStarted && jd && (
+          <div className="gpt-empty">
+            <h1>{jd.jobTitle ? `Applying for ${jd.jobTitle}` : "Ready to help"}</h1>
+            {jd.company && <p className="muted">at {jd.company}</p>}
+            <p className="muted">Ask anything about this application.</p>
+          </div>
+        )}
+
+        {messages.map((m) => (
+          <ChatMessage
+            key={m.id}
+            role={m.role as "user" | "assistant"}
+            content={m.content}
+          />
+        ))}
+
+        {loading && (
+          <ChatMessage role="assistant" content="">
+            <span className="gpt-typing">Thinking...</span>
+          </ChatMessage>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="gpt-bottom">
+        <ChatInputBar
+          value={input}
+          onChange={setInput}
+          onSubmit={handleSend}
+          loading={loading}
+          disabled={!profileId}
+          placeholder={
+            profileId
+              ? "Ask about cover letters, gaps, or interview questions..."
+              : "Select a profile to start..."
+          }
+        />
+        {error && <p className="error gpt-error">{error}</p>}
+      </div>
     </div>
   );
 }

@@ -3,9 +3,9 @@ import { Sidebar } from "./Sidebar";
 
 export function Layout() {
   return (
-    <div className="app-layout">
+    <div className="gpt-app">
       <Sidebar />
-      <main className="main-content">
+      <main className="gpt-main">
         <Outlet />
       </main>
     </div>

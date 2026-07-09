@@ -21,7 +21,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<Profiles />} />
+            <Route index element={<Navigate to="/tailor" replace />} />
+            <Route path="profiles" element={<Profiles />} />
             <Route path="tailor" element={<Tailor />} />
             <Route path="chat" element={<Chat />} />
             <Route path="settings" element={<Settings />} />

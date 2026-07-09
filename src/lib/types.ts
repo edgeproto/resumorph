@@ -94,6 +94,13 @@ export interface AppSettings {
   pdfConverter: "auto" | "word" | "libreoffice";
 }
 
+export interface ParsedJobDescription {
+  text: string;
+  jobTitle: string | null;
+  company: string | null;
+  sourceType: string;
+}
+
 export interface CreateOutputInput {
   sessionId: string;
   contentJson?: string | null;

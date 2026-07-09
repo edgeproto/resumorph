@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod docx;
+mod jd_parser;
 mod pdf;
 mod resume_parser;
 
@@ -21,6 +22,7 @@ use commands::export::{
     get_output, inject_docx_placeholders, list_builtin_templates, list_outputs, read_file_bytes,
     save_export_file,
 };
+use commands::jd::{parse_jd_from_file, parse_jd_from_text, pick_and_parse_jd};
 use commands::resume::{get_profile_resume_text, ingest_resume_file, pick_and_ingest_resume};
 use commands::sessions::{
     create_session, delete_session, get_session, list_sessions, update_session,
@@ -84,6 +86,9 @@ pub fn run() {
             create_output,
             get_output,
             list_outputs,
+            parse_jd_from_text,
+            parse_jd_from_file,
+            pick_and_parse_jd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
