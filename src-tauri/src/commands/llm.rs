@@ -1,7 +1,9 @@
-use crate::commands::keys::get_api_key;
+use crate::commands::keys::get_api_key_for_provider;
+use crate::db::Database;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tauri::State;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,8 +24,8 @@ pub struct CompleteLlmInput {
 }
 
 #[tauri::command]
-pub fn complete_llm(input: CompleteLlmInput) -> Result<String, String> {
-    let api_key = get_api_key(input.provider.clone())?;
+pub fn complete_llm(db: State<'_, Database>, input: CompleteLlmInput) -> Result<String, String> {
+    let api_key = get_api_key_for_provider(&db, &input.provider)?;
     if api_key.trim().is_empty() {
         return Err("No API key configured. Add one in Settings.".into());
     }

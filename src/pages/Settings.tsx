@@ -4,7 +4,7 @@ import { PromptEditor } from "../components/PromptEditor";
 import { api } from "../lib/api";
 import { saveAppSettings, DEFAULT_SETTINGS, useAppSettings } from "../lib/settings";
 import { isTauri } from "../lib/tauri";
-import type { AppSettings, LlmProviderId } from "../lib/types";
+import type { ApiKeyStatus, AppSettings, LlmProviderId } from "../lib/types";
 
 const PROVIDERS: { id: LlmProviderId; label: string }[] = [
   { id: "anthropic", label: "Anthropic" },
@@ -22,6 +22,9 @@ export function Settings() {
   const [presetSystem, setPresetSystem] = useState("");
   const [presetUser, setPresetUser] = useState("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [keyFeedback, setKeyFeedback] = useState<
+    Record<string, { type: "success" | "error"; message: string } | undefined>
+  >({});
 
   const { data: appData } = useQuery({
     queryKey: ["appData"],
@@ -45,20 +48,73 @@ export function Settings() {
     if (settings) setForm(settings);
   }, [settings]);
 
+  function setProviderFeedback(
+    provider: string,
+    feedback: { type: "success" | "error"; message: string } | undefined,
+  ) {
+    setKeyFeedback((prev) => ({ ...prev, [provider]: feedback }));
+    if (feedback) {
+      setTimeout(() => {
+        setKeyFeedback((prev) =>
+          prev[provider] === feedback ? { ...prev, [provider]: undefined } : prev,
+        );
+      }, 5000);
+    }
+  }
+
+  function optimisticSetKeyStatus(provider: string, hasKey: boolean) {
+    queryClient.setQueryData<ApiKeyStatus[]>(["apiKeyStatus"], (old) => {
+      const base =
+        old ?? PROVIDERS.map((p) => ({ provider: p.id, hasKey: false }));
+      return base.map((k) => (k.provider === provider ? { ...k, hasKey } : k));
+    });
+  }
+
   const saveKeyMutation = useMutation({
     mutationFn: ({ provider, key }: { provider: string; key: string }) =>
       api.setApiKey(provider, key),
-    onSuccess: () => {
+    onMutate: ({ provider }) => {
+      setProviderFeedback(provider, undefined);
+    },
+    onSuccess: (_data, { provider }) => {
+      optimisticSetKeyStatus(provider, true);
       queryClient.invalidateQueries({ queryKey: ["apiKeyStatus"] });
       refetchKeyStatus();
-      setKeyInputs({});
+      setKeyInputs((prev) => ({ ...prev, [provider]: "" }));
+      setProviderFeedback(provider, {
+        type: "success",
+        message: "API key saved.",
+      });
+    },
+    onError: (error, { provider }) => {
+      setProviderFeedback(provider, {
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to save API key.",
+      });
     },
   });
 
   const deleteKeyMutation = useMutation({
     mutationFn: (provider: string) => api.deleteApiKey(provider),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["apiKeyStatus"] }),
+    onMutate: (provider) => {
+      setProviderFeedback(provider, undefined);
+    },
+    onSuccess: (_data, provider) => {
+      optimisticSetKeyStatus(provider, false);
+      queryClient.invalidateQueries({ queryKey: ["apiKeyStatus"] });
+      setProviderFeedback(provider, {
+        type: "success",
+        message: "API key removed.",
+      });
+    },
+    onError: (error, provider) => {
+      setProviderFeedback(provider, {
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to remove API key.",
+      });
+    },
   });
 
   const saveSettingsMutation = useMutation({
@@ -100,8 +156,9 @@ export function Settings() {
       <header className="page-header">
         <h2>Settings</h2>
         <p>
-          Add your LLM API keys here — stored in your OS keychain, never in the
-          database. You need at least one key before chatting or tailoring.
+          Add your LLM API keys here — stored in your OS keychain when
+          available, with a local fallback if keychain access fails. You need
+          at least one key before chatting or tailoring.
         </p>
       </header>
 
@@ -282,12 +339,23 @@ export function Settings() {
                   <button
                     type="button"
                     className="danger"
+                    disabled={deleteKeyMutation.isPending}
                     onClick={() => deleteKeyMutation.mutate(id)}
                   >
                     Remove
                   </button>
                 )}
               </div>
+              {keyFeedback[id] && (
+                <p
+                  className={
+                    keyFeedback[id]!.type === "success" ? "success" : "error"
+                  }
+                  style={{ margin: "0.35rem 0 0" }}
+                >
+                  {keyFeedback[id]!.message}
+                </p>
+              )}
             </div>
           );
         })}

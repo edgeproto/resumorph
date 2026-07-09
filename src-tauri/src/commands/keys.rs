@@ -1,6 +1,9 @@
+use crate::db::Database;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
 const SERVICE_NAME: &str = "resumorph";
+const API_KEY_SETTING_PREFIX: &str = "api_key_";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,48 +16,137 @@ fn keyring_entry(provider: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE_NAME, provider).map_err(|e| format!("Keyring error: {e}"))
 }
 
-#[tauri::command]
-pub fn set_api_key(provider: String, api_key: String) -> Result<(), String> {
-    let entry = keyring_entry(&provider)?;
-    entry
-        .set_password(&api_key)
-        .map_err(|e| format!("Failed to store API key: {e}"))
+fn fallback_setting_key(provider: &str) -> String {
+    format!("{API_KEY_SETTING_PREFIX}{provider}")
 }
 
-#[tauri::command]
-pub fn get_api_key(provider: String) -> Result<String, String> {
-    let entry = keyring_entry(&provider)?;
-    entry
-        .get_password()
-        .map_err(|e| format!("Failed to retrieve API key: {e}"))
+fn read_fallback_key(db: &Database, provider: &str) -> Result<Option<String>, String> {
+    let key = fallback_setting_key(provider);
+    db.with_conn(|conn| {
+        let result = conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [&key],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+            Ok(_) => Ok(None),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn delete_api_key(provider: String) -> Result<(), String> {
-    let entry = keyring_entry(&provider)?;
-    entry
-        .delete_credential()
-        .map_err(|e| format!("Failed to delete API key: {e}"))
+fn write_fallback_key(db: &Database, provider: &str, api_key: &str) -> Result<(), String> {
+    let key = fallback_setting_key(provider);
+    db.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![&key, api_key],
+        )?;
+        Ok(())
+    })
+    .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn has_api_key(provider: String) -> Result<bool, String> {
-    match keyring_entry(&provider)?.get_password() {
-        Ok(_) => Ok(true),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(e) => Err(format!("Failed to check API key: {e}")),
+fn remove_fallback_key(db: &Database, provider: &str) -> Result<(), String> {
+    let key = fallback_setting_key(provider);
+    db.with_conn(|conn| {
+        conn.execute("DELETE FROM settings WHERE key = ?1", [&key])?;
+        Ok(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+pub fn get_api_key_for_provider(db: &Database, provider: &str) -> Result<String, String> {
+    match keyring_entry(provider) {
+        Ok(entry) => match entry.get_password() {
+            Ok(key) => Ok(key),
+            Err(keyring::Error::NoEntry) => read_fallback_key(db, provider)?
+                .ok_or_else(|| "No API key configured. Add one in Settings.".into()),
+            Err(e) => match read_fallback_key(db, provider)? {
+                Some(key) => Ok(key),
+                None => Err(format!("Failed to retrieve API key: {e}")),
+            },
+        },
+        Err(e) => read_fallback_key(db, provider)?
+            .ok_or_else(|| format!("Failed to retrieve API key: {e}")),
+    }
+}
+
+pub fn has_api_key_for_provider(db: &Database, provider: &str) -> Result<bool, String> {
+    match keyring_entry(provider) {
+        Ok(entry) => match entry.get_password() {
+            Ok(key) => Ok(!key.trim().is_empty()),
+            Err(keyring::Error::NoEntry) => Ok(read_fallback_key(db, provider)?.is_some()),
+            Err(_) => Ok(read_fallback_key(db, provider)?.is_some()),
+        },
+        Err(_) => Ok(read_fallback_key(db, provider)?.is_some()),
     }
 }
 
 #[tauri::command]
-pub fn list_api_key_status() -> Result<Vec<ApiKeyStatus>, String> {
+pub fn set_api_key(
+    db: State<'_, Database>,
+    provider: String,
+    api_key: String,
+) -> Result<(), String> {
+    match keyring_entry(&provider) {
+        Ok(entry) => match entry.set_password(&api_key) {
+            Ok(()) => {
+                remove_fallback_key(&db, &provider).ok();
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: OS keychain storage failed for provider '{provider}', \
+                     falling back to local database: {e}"
+                );
+                write_fallback_key(&db, &provider, &api_key)
+            }
+        },
+        Err(e) => {
+            eprintln!(
+                "Warning: OS keychain unavailable for provider '{provider}', \
+                 storing in local database: {e}"
+            );
+            write_fallback_key(&db, &provider, &api_key)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_api_key(db: State<'_, Database>, provider: String) -> Result<String, String> {
+    get_api_key_for_provider(&db, &provider)
+}
+
+#[tauri::command]
+pub fn delete_api_key(db: State<'_, Database>, provider: String) -> Result<(), String> {
+    if let Ok(entry) = keyring_entry(&provider) {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(format!("Failed to delete API key from keychain: {e}")),
+        }
+    }
+    remove_fallback_key(&db, &provider)
+}
+
+#[tauri::command]
+pub fn has_api_key(db: State<'_, Database>, provider: String) -> Result<bool, String> {
+    has_api_key_for_provider(&db, &provider)
+}
+
+#[tauri::command]
+pub fn list_api_key_status(db: State<'_, Database>) -> Result<Vec<ApiKeyStatus>, String> {
     let providers = ["anthropic", "openai", "custom"];
     providers
         .iter()
         .map(|p| {
             Ok(ApiKeyStatus {
                 provider: (*p).to_string(),
-                has_key: has_api_key((*p).to_string())?,
+                has_key: has_api_key_for_provider(&db, p)?,
             })
         })
         .collect()
