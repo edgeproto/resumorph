@@ -151,3 +151,46 @@ pub fn list_api_key_status(db: State<'_, Database>) -> Result<Vec<ApiKeyStatus>,
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use std::path::PathBuf;
+
+    fn temp_db() -> (Database, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("resumorph-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+        let db = Database::new(&path).unwrap();
+        (db, path)
+    }
+
+    #[test]
+    fn fallback_key_roundtrip() {
+        let (db, _path) = temp_db();
+        write_fallback_key(&db, "anthropic", "sk-test-key-12345").unwrap();
+        assert!(has_api_key_for_provider(&db, "anthropic").unwrap());
+        let key = read_fallback_key(&db, "anthropic").unwrap();
+        assert_eq!(key.as_deref(), Some("sk-test-key-12345"));
+        remove_fallback_key(&db, "anthropic").unwrap();
+        assert!(!has_api_key_for_provider(&db, "anthropic").unwrap());
+    }
+
+    #[test]
+    fn list_api_key_status_reflects_fallback() {
+        let (db, _path) = temp_db();
+        write_fallback_key(&db, "openai", "sk-openai-test").unwrap();
+        let statuses: Vec<ApiKeyStatus> = ["anthropic", "openai", "custom"]
+            .iter()
+            .map(|p| ApiKeyStatus {
+                provider: (*p).to_string(),
+                has_key: has_api_key_for_provider(&db, p).unwrap(),
+            })
+            .collect();
+        let openai = statuses.iter().find(|s| s.provider == "openai").unwrap();
+        assert!(openai.has_key);
+        let anthropic = statuses.iter().find(|s| s.provider == "anthropic").unwrap();
+        assert!(!anthropic.has_key);
+    }
+}
