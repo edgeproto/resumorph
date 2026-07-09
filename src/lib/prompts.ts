@@ -51,7 +51,7 @@ export function buildPromptContext(
 
 export function getDefaultPreset(
   presets: PromptPreset[],
-  mode: "tailor" | "qa" | "session",
+  mode: "tailor" | "cover_letter" | "qa" | "session",
 ): PromptPreset | undefined {
   return (
     presets.find((p) => p.mode === mode && p.isDefault) ??

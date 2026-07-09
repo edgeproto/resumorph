@@ -1,17 +1,14 @@
 import type { Message } from "./types";
 import type { TailoredResume } from "./docx";
 import { parseTailoredJson } from "./docx";
-import type { ChatType } from "./chatTypes";
+import type { SessionAction } from "./chatTypes";
 
 export interface ExportableContent {
   tailored: TailoredResume | null;
   coverLetter: string | null;
 }
 
-export function findLatestExportable(
-  messages: Message[],
-  chatType: ChatType,
-): ExportableContent {
+export function findLatestExportable(messages: Message[]): ExportableContent {
   let tailored: TailoredResume | null = null;
   let coverLetter: string | null = null;
 
@@ -19,18 +16,18 @@ export function findLatestExportable(
     const m = messages[i];
     if (m.role !== "assistant") continue;
 
-    if (chatType === "tailor" && !tailored) {
+    if (!tailored) {
       try {
         const parsed = parseTailoredJson(m.content);
         if (parsed.experience || parsed.summary || parsed.skills) {
           tailored = parsed;
         }
       } catch {
-        /* not JSON */
+        /* not JSON resume */
       }
     }
 
-    if (chatType === "cover_letter" && !coverLetter) {
+    if (!coverLetter) {
       try {
         const parsed = parseTailoredJson(m.content);
         if (parsed.cover_letter) {
@@ -38,21 +35,24 @@ export function findLatestExportable(
         }
       } catch {
         const text = m.content.trim();
-        if (text.length > 80) {
+        if (text.length > 80 && !text.startsWith("{")) {
           coverLetter = text;
         }
       }
     }
 
-    if (
-      (chatType === "tailor" && tailored) ||
-      (chatType === "cover_letter" && coverLetter)
-    ) {
-      break;
-    }
+    if (tailored && coverLetter) break;
   }
 
   return { tailored, coverLetter };
+}
+
+/** @deprecated Pass messages only; action is ignored */
+export function findLatestExportableForAction(
+  messages: Message[],
+  _action?: SessionAction,
+): ExportableContent {
+  return findLatestExportable(messages);
 }
 
 export const COVER_LETTER_SYSTEM_PROMPT = `You are an expert cover letter writer for job applications.

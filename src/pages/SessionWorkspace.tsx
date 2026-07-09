@@ -1,15 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ChatInputBar, ChatMessage } from "../components/ChatUI";
 import { ExportDialog } from "../components/ExportDialog";
 import { JobDescriptionInput } from "../components/JobDescriptionInput";
 import { ResumeInput } from "../components/ResumeInput";
 import { api, parseProfileResume } from "../lib/api";
 import {
-  CHAT_TYPES,
-  isExportableChatType,
-  type ChatType,
+  actionUserMessage,
+  type SessionAction,
 } from "../lib/chatTypes";
 import {
   tailoredToPreviewText,
@@ -32,8 +31,10 @@ import type {
   LlmProviderId,
   ParsedJobDescription,
   ParsedResume,
+  PromptPreset,
   Session,
 } from "../lib/types";
+import type { ExportKind } from "../components/ExportDialog";
 
 function parseSessionResume(session: Session | undefined): ParsedResume | null {
   if (!session?.resumeJson) return null;
@@ -44,21 +45,57 @@ function parseSessionResume(session: Session | undefined): ParsedResume | null {
   }
 }
 
-function parseChatType(value: string | undefined | null): ChatType {
-  if (value === "tailor" || value === "cover_letter" || value === "qa") {
-    return value;
+function getPromptsForAction(
+  action: SessionAction,
+  presets: PromptPreset[],
+): { systemPrompt: string; userPrompt: string } {
+  if (action === "cover_letter") {
+    const preset = getDefaultPreset(presets, "cover_letter");
+    if (preset) {
+      return {
+        systemPrompt: preset.systemPrompt,
+        userPrompt: preset.userPrompt,
+      };
+    }
+    return {
+      systemPrompt: COVER_LETTER_SYSTEM_PROMPT,
+      userPrompt: COVER_LETTER_USER_PROMPT,
+    };
   }
-  return "tailor";
+
+  const mode = action === "tailor" ? "tailor" : "qa";
+  const preset = getDefaultPreset(presets, mode);
+  if (preset) {
+    return {
+      systemPrompt: preset.systemPrompt,
+      userPrompt: preset.userPrompt,
+    };
+  }
+
+  return {
+    systemPrompt: "You are a helpful career assistant.",
+    userPrompt: "{{user_question}}",
+  };
 }
 
-function defaultUserQuestion(chatType: ChatType): string {
-  if (chatType === "tailor") {
-    return "Tailor my resume for this job. Return JSON only.";
+function parseAssistantOutput(content: string): {
+  tailored: TailoredResume | null;
+  coverPreview: string | null;
+} {
+  try {
+    const parsed = parseTailoredJson(content);
+    const hasResume =
+      !!(parsed.experience?.length || parsed.summary || parsed.skills?.length);
+    if (parsed.cover_letter && !hasResume) {
+      return { tailored: null, coverPreview: parsed.cover_letter };
+    }
+    if (hasResume) {
+      return { tailored: parsed, coverPreview: parsed.cover_letter ?? null };
+    }
+  } catch {
+    /* prose */
   }
-  if (chatType === "cover_letter") {
-    return "Write a cover letter for this job. Return JSON with cover_letter key.";
-  }
-  return "";
+  return { tailored: null, coverPreview: null };
 }
 
 export function SessionWorkspace() {
@@ -74,15 +111,16 @@ export function SessionWorkspace() {
   const [jd, setJd] = useState<ParsedJobDescription | null>(null);
   const [sessionResume, setSessionResume] = useState<ParsedResume | null>(null);
   const [showAttach, setShowAttach] = useState(false);
-  const [chatType, setChatType] = useState<ChatType>("tailor");
+  const [showAdditionalInstructions, setShowAdditionalInstructions] =
+    useState(false);
+  const [additionalInstructions, setAdditionalInstructions] = useState("");
   const [provider, setProvider] = useState<LlmProviderId>("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-20250514");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [userPrompt, setUserPrompt] = useState("");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [exportKind, setExportKind] = useState<ExportKind>("resume");
 
   const { data: profiles = [] } = useQuery({
     queryKey: ["profiles"],
@@ -113,14 +151,17 @@ export function SessionWorkspace() {
   const activeResume = sessionResume ?? profileResume;
 
   const exportable = useMemo(
-    () => findLatestExportable(messages, chatType),
-    [messages, chatType],
+    () => findLatestExportable(messages),
+    [messages],
   );
 
-  const canExport =
-    isExportableChatType(chatType) &&
-    ((chatType === "tailor" && !!exportable.tailored) ||
-      (chatType === "cover_letter" && !!exportable.coverLetter));
+  const canExportResume = !!exportable.tailored;
+  const canExportCoverLetter = !!exportable.coverLetter;
+  const canExport = canExportResume || canExportCoverLetter;
+
+  const workspaceReady = !!profileId && !!jd && !!activeResume && !!sessionId;
+  const showJdGate = !!profileId && !jd;
+  const showResumeGate = !!profileId && !!jd && !activeResume;
 
   useEffect(() => {
     if (settings) {
@@ -128,28 +169,6 @@ export function SessionWorkspace() {
       setModel(modelForProvider(settings, settings.defaultProvider));
     }
   }, [settings]);
-
-  useEffect(() => {
-    if (session?.chatType) {
-      setChatType(parseChatType(session.chatType));
-    } else if (!sessionId) {
-      setChatType("tailor");
-    }
-  }, [session, sessionId]);
-
-  useEffect(() => {
-    if (chatType === "cover_letter") {
-      setSystemPrompt(COVER_LETTER_SYSTEM_PROMPT);
-      setUserPrompt(COVER_LETTER_USER_PROMPT);
-      return;
-    }
-    const mode = chatType === "tailor" ? "tailor" : "qa";
-    const preset = getDefaultPreset(presets, mode);
-    if (preset) {
-      setSystemPrompt(preset.systemPrompt);
-      setUserPrompt(preset.userPrompt);
-    }
-  }, [presets, chatType]);
 
   useEffect(() => {
     if (session) {
@@ -191,23 +210,54 @@ export function SessionWorkspace() {
     queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
   }
 
-  async function handleChatTypeChange(next: ChatType) {
-    setChatType(next);
-    if (sessionId) {
-      await api.updateSession({ id: sessionId, chatType: next });
-      queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
-    }
+  async function createSessionWithJd(
+    nextProfileId: string,
+    nextJd: ParsedJobDescription,
+  ) {
+    const created = await api.createSession({
+      profileId: nextProfileId,
+      jobDescription: nextJd.text,
+      jobTitle: nextJd.jobTitle ?? undefined,
+      company: nextJd.company ?? undefined,
+      resumeJson: sessionResume ? JSON.stringify(sessionResume) : undefined,
+      chatType: "qa",
+    });
+    const params = new URLSearchParams();
+    params.set("profile", nextProfileId);
+    params.set("session", created.id);
+    navigate(`/?${params.toString()}`, { replace: true });
+    queryClient.invalidateQueries({ queryKey: ["sessions", nextProfileId] });
+    return created.id;
   }
 
   async function handleJdChange(next: ParsedJobDescription | null) {
     setJd(next);
+    setError(null);
+
+    if (!next) {
+      if (sessionId) {
+        await persistSessionContext(sessionId, null, sessionResume);
+      }
+      return;
+    }
+
     if (sessionId) {
       await persistSessionContext(sessionId, next, sessionResume);
+      return;
+    }
+
+    if (profileId) {
+      try {
+        await createSessionWithJd(profileId, next);
+      } catch (e) {
+        setError((e as Error).message);
+      }
     }
   }
 
   async function handleResumeChange(next: ParsedResume | null) {
     setSessionResume(next);
+    setError(null);
     if (sessionId) {
       if (next === null) {
         await api.updateSession({ id: sessionId, clearResume: true });
@@ -222,66 +272,61 @@ export function SessionWorkspace() {
     }
   }
 
-  async function ensureSession(): Promise<string> {
-    if (sessionId) return sessionId;
-    if (!profileId) throw new Error("Select a profile in the sidebar first");
-    const created = await api.createSession({
-      profileId,
-      jobDescription: jd?.text,
-      jobTitle: jd?.jobTitle ?? undefined,
-      company: jd?.company ?? undefined,
-      resumeJson: sessionResume ? JSON.stringify(sessionResume) : undefined,
-      chatType,
-    });
-    const params = new URLSearchParams();
-    params.set("profile", profileId);
-    params.set("session", created.id);
-    navigate(`/?${params.toString()}`, { replace: true });
-    queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
-    return created.id;
-  }
+  async function sendMessage(options: {
+    action?: SessionAction;
+    text?: string;
+    useAdditionalInstructions?: boolean;
+  }) {
+    const action = options.action ?? "qa";
+    const userText = options.text?.trim() ?? "";
+    const extra =
+      options.useAdditionalInstructions && action !== "qa"
+        ? additionalInstructions
+        : undefined;
 
-  async function handleSend() {
     if (!profileId) {
       setError("Select a profile in the sidebar first");
       return;
     }
+    if (!jd || !sessionId) {
+      setError("Add a job description before sending messages");
+      return;
+    }
     if (!activeResume) {
-      setError("Add a resume to the profile or attach one for this session");
+      setError("Add a resume to the profile or upload one for this session");
       return;
     }
 
-    const question = input.trim() || defaultUserQuestion(chatType);
+    const question =
+      action === "qa"
+        ? userText
+        : actionUserMessage(action, extra);
+
     if (!question) return;
 
     setLoading(true);
     setError(null);
-    setInput("");
+    if (action === "qa") {
+      setInput("");
+    }
 
     try {
-      const activeSessionId = await ensureSession();
-      const priorMessages = sessionId === activeSessionId ? messages : [];
+      const { systemPrompt, userPrompt } = getPromptsForAction(action, presets);
 
       await api.createMessage({
-        sessionId: activeSessionId,
+        sessionId,
         role: "user",
         content: question,
       });
-      queryClient.invalidateQueries({
-        queryKey: ["messages", activeSessionId],
-      });
-
-      if (jd || sessionResume) {
-        await persistSessionContext(activeSessionId, jd, sessionResume);
-      }
+      queryClient.invalidateQueries({ queryKey: ["messages", sessionId] });
 
       const context = buildPromptContext(
         activeResume,
         selectedProfile?.name ?? "",
         {
-          jobDescription: jd?.text ?? "",
-          jobTitle: jd?.jobTitle ?? "",
-          company: jd?.company ?? "",
+          jobDescription: jd.text,
+          jobTitle: jd.jobTitle ?? "",
+          company: jd.company ?? "",
           userQuestion: question,
         },
       );
@@ -293,12 +338,12 @@ export function SessionWorkspace() {
 
       const systemContent = `${systemPrompt}\n\n--- Application context ---\n${contextBlock}`;
 
-      const history = priorMessages.map((m) => ({
+      const history = messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      const jsonMode = chatType === "tailor" || chatType === "cover_letter";
+      const jsonMode = action === "tailor" || action === "cover_letter";
 
       const response = await completeWithProvider(
         provider,
@@ -319,20 +364,18 @@ export function SessionWorkspace() {
       );
 
       await api.createMessage({
-        sessionId: activeSessionId,
+        sessionId,
         role: "assistant",
         content: response,
       });
-      queryClient.invalidateQueries({
-        queryKey: ["messages", activeSessionId],
-      });
+      queryClient.invalidateQueries({ queryKey: ["messages", sessionId] });
 
       if (jsonMode) {
         try {
           const parsed = parseTailoredJson(response);
           await api.createOutput({
-            sessionId: activeSessionId,
-            contentJson: chatType === "tailor" ? response : null,
+            sessionId,
+            contentJson: action === "tailor" ? response : null,
             coverLetter: parsed.cover_letter ?? null,
           });
         } catch {
@@ -346,70 +389,89 @@ export function SessionWorkspace() {
     }
   }
 
-  const hasStarted = messages.length > 0;
-  const activeChatType = CHAT_TYPES.find((t) => t.id === chatType);
+  function handleAction(action: SessionAction) {
+    void sendMessage({ action, useAdditionalInstructions: true });
+  }
+
+  function handleSend() {
+    void sendMessage({ action: "qa", text: input });
+  }
+
+  function openExport(kind: ExportKind) {
+    setExportKind(kind);
+    setShowExport(true);
+  }
 
   return (
     <div className="gpt-page">
-      <header className="gpt-topbar">
-        <div className="gpt-topbar-center">
-          <select
-            className="gpt-mode-select"
-            value={chatType}
-            onChange={(e) =>
-              handleChatTypeChange(e.target.value as ChatType)
-            }
-            disabled={!profileId}
-            title={activeChatType?.description}
-          >
-            {CHAT_TYPES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="gpt-topbar-actions">
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => setShowAttach(!showAttach)}
-            disabled={!profileId}
-          >
-            Attach
-          </button>
-
-          {canExport && (
+      {workspaceReady && (
+        <header className="gpt-topbar">
+          <div className="gpt-action-bar">
             <button
               type="button"
-              className="btn-primary gpt-export-btn"
-              onClick={() => setShowExport(true)}
+              className="gpt-action-btn gpt-action-primary"
+              onClick={() => handleAction("tailor")}
+              disabled={loading}
             >
-              Export {chatType === "cover_letter" ? "cover letter" : "resume"}
+              Tailor Resume
             </button>
-          )}
-        </div>
-      </header>
+            <button
+              type="button"
+              className="gpt-action-btn gpt-action-primary"
+              onClick={() => handleAction("cover_letter")}
+              disabled={loading}
+            >
+              Create Cover Letter
+            </button>
 
-      {showAttach && profileId && (
+            {canExport && (
+              <div className="gpt-export-group">
+                {canExportResume && (
+                  <button
+                    type="button"
+                    className="btn-primary gpt-export-btn"
+                    onClick={() => openExport("resume")}
+                  >
+                    Export resume
+                  </button>
+                )}
+                {canExportCoverLetter && (
+                  <button
+                    type="button"
+                    className="btn-primary gpt-export-btn"
+                    onClick={() => openExport("cover_letter")}
+                  >
+                    Export cover letter
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="gpt-action-btn"
+              onClick={() => setShowAttach(!showAttach)}
+            >
+              Attach resume
+            </button>
+          </div>
+        </header>
+      )}
+
+      {showAttach && workspaceReady && (
         <div className="attach-panel">
-          <div className="attach-grid">
-            <div>
-              <h4>Job description</h4>
-              <JobDescriptionInput value={jd} onChange={handleJdChange} />
-            </div>
-            <div>
-              <h4>Resume (this session)</h4>
-              <p className="muted small">
-                Overrides profile resume for this session only.
-              </p>
-              <ResumeInput
-                value={sessionResume}
-                onChange={handleResumeChange}
-                label="Session resume"
-              />
-            </div>
+          <div>
+            <h4>Resume override (this session)</h4>
+            <p className="muted small">
+              {profileResume
+                ? "Overrides the profile resume for this session only."
+                : "Upload a resume for this session."}
+            </p>
+            <ResumeInput
+              value={sessionResume}
+              onChange={handleResumeChange}
+              label="Session resume"
+            />
           </div>
           <button
             type="button"
@@ -426,53 +488,62 @@ export function SessionWorkspace() {
           <div className="gpt-empty">
             <h1>Welcome to Resumorph</h1>
             <p className="muted">
-              Select a profile in the sidebar, or{" "}
-              <Link to="/profiles">create one with a title and resume</Link>.
+              Select a profile in the sidebar, or create one with a name and
+              resume.
             </p>
           </div>
         )}
 
-        {profileId && !hasStarted && (
-          <div className="gpt-empty">
-            <h1>
-              {selectedProfile?.name ?? "New session"}
-            </h1>
-            <p className="muted">{activeChatType?.description}</p>
-            {!activeResume && (
-              <p className="error">
-                Profile has no resume.{" "}
-                <Link to="/profiles">Add one in Profiles</Link> or attach below.
-              </p>
-            )}
-            <div className="gpt-empty-jd attach-grid">
+        {showJdGate && (
+          <div className="gpt-empty gpt-gate">
+            <h1>{selectedProfile?.name ?? "New session"}</h1>
+            <p className="muted">
+              Start by adding the job description. A session is created once the
+              JD is saved.
+            </p>
+            <div className="gpt-gate-card">
               <JobDescriptionInput value={jd} onChange={handleJdChange} />
+            </div>
+          </div>
+        )}
+
+        {showResumeGate && (
+          <div className="gpt-empty gpt-gate">
+            <h1>Add your resume</h1>
+            <p className="muted">
+              {profileResume
+                ? "Attach a different resume for this session, or use the profile resume."
+                : "Upload or paste your resume to continue."}
+            </p>
+            {jd && (
+              <div className="gpt-gate-jd-summary">
+                <JobDescriptionInput value={jd} onChange={handleJdChange} compact />
+              </div>
+            )}
+            <div className="gpt-gate-card">
               <ResumeInput
-                value={sessionResume}
+                value={sessionResume ?? profileResume}
                 onChange={handleResumeChange}
-                label="Session resume"
+                label="Resume"
               />
             </div>
+          </div>
+        )}
+
+        {workspaceReady && jd && (
+          <div className="gpt-session-context">
+            <JobDescriptionInput value={jd} onChange={handleJdChange} compact />
           </div>
         )}
 
         {messages.map((m) => {
           let tailored: TailoredResume | null = null;
           let coverPreview: string | null = null;
+
           if (m.role === "assistant") {
-            if (chatType === "tailor") {
-              try {
-                tailored = parseTailoredJson(m.content);
-              } catch {
-                /* prose */
-              }
-            } else if (chatType === "cover_letter") {
-              try {
-                const parsed = parseTailoredJson(m.content);
-                coverPreview = parsed.cover_letter ?? null;
-              } catch {
-                coverPreview = m.content;
-              }
-            }
+            const parsed = parseAssistantOutput(m.content);
+            tailored = parsed.tailored;
+            coverPreview = parsed.coverPreview;
           }
 
           const displayContent =
@@ -493,7 +564,7 @@ export function SessionWorkspace() {
                   {tailoredToPreviewText(tailored)}
                 </pre>
               )}
-              {coverPreview && (
+              {coverPreview && !tailored && (
                 <pre className="output preview-content">{coverPreview}</pre>
               )}
             </ChatMessage>
@@ -509,42 +580,66 @@ export function SessionWorkspace() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="gpt-bottom">
-        {canExport && (
-          <div className="gpt-export-hint">
-            <span className="muted small">
-              Happy with this version? Click Export above, or send more
-              instructions to refine.
-            </span>
+      {workspaceReady && (
+        <div className="gpt-bottom">
+          {canExport && (
+            <div className="gpt-export-hint">
+              <span className="muted small">
+                Happy with this version? Export above, or send more instructions
+                to refine.
+              </span>
+            </div>
+          )}
+
+          <div className="gpt-additional-wrap">
+            <button
+              type="button"
+              className="gpt-additional-toggle"
+              onClick={() => setShowAdditionalInstructions((v) => !v)}
+              aria-expanded={showAdditionalInstructions}
+            >
+              {showAdditionalInstructions ? "Hide" : "Additional instructions"}
+              <span className="muted small">
+                {" "}
+                (for Tailor / Cover Letter only)
+              </span>
+            </button>
+            {showAdditionalInstructions && (
+              <textarea
+                className="gpt-additional-input"
+                rows={2}
+                value={additionalInstructions}
+                onChange={(e) => setAdditionalInstructions(e.target.value)}
+                placeholder="e.g. Emphasize leadership experience, keep bullets shorter..."
+                disabled={loading}
+              />
+            )}
           </div>
-        )}
-        <ChatInputBar
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSend}
-          loading={loading}
-          disabled={!profileId || !activeResume}
-          placeholder={
-            !profileId
-              ? "Select a profile in the sidebar..."
-              : !activeResume
-                ? "Add a resume to continue..."
-                : chatType === "tailor"
-                  ? "Tailor my resume… or ask for changes"
-                  : chatType === "cover_letter"
-                    ? "Write a cover letter… or ask for changes"
-                    : "Ask an application question..."
-          }
-        />
-        {error && <p className="error gpt-error">{error}</p>}
-      </div>
+
+          <ChatInputBar
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSend}
+            loading={loading}
+            disabled={!workspaceReady}
+            placeholder="Ask an application question..."
+          />
+          {error && <p className="error gpt-error">{error}</p>}
+        </div>
+      )}
 
       {showExport && profileId && (
         <ExportDialog
           profileId={profileId}
           tailored={exportable.tailored ?? undefined}
           coverLetter={exportable.coverLetter ?? undefined}
-          exportKind={chatType === "cover_letter" ? "cover_letter" : "resume"}
+          exportKind={
+            exportKind === "cover_letter" && canExportCoverLetter
+              ? "cover_letter"
+              : canExportResume
+                ? "resume"
+                : "cover_letter"
+          }
           sessionId={sessionId || undefined}
           onClose={() => setShowExport(false)}
         />

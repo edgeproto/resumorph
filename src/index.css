@@ -123,7 +123,111 @@ body {
 }
 
 .gpt-topbar {
-  justify-content: space-between;
+  justify-content: flex-start;
+}
+
+.gpt-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.gpt-action-btn {
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--gpt-border);
+  background: transparent;
+  color: var(--gpt-text);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.gpt-action-btn:hover:not(:disabled) {
+  background: var(--gpt-surface);
+  border-color: var(--gpt-muted);
+}
+
+.gpt-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gpt-action-primary {
+  background: var(--gpt-accent);
+  border-color: var(--gpt-accent);
+  color: #fff;
+}
+
+.gpt-action-primary:hover:not(:disabled) {
+  background: #0d8f6e;
+  border-color: #0d8f6e;
+}
+
+.gpt-export-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.gpt-gate {
+  text-align: center;
+}
+
+.gpt-gate-card {
+  margin-top: 1.5rem;
+  text-align: left;
+  background: var(--gpt-surface);
+  border: 1px solid var(--gpt-border);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.gpt-gate-jd-summary {
+  max-width: 480px;
+  margin: 1rem auto 0;
+  text-align: left;
+}
+
+.gpt-session-context {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 0 1.5rem 0.75rem;
+}
+
+.gpt-additional-wrap {
+  max-width: 768px;
+  margin: 0 auto 0.5rem;
+}
+
+.gpt-additional-toggle {
+  background: none;
+  border: none;
+  color: var(--gpt-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.gpt-additional-toggle:hover {
+  color: var(--gpt-text);
+}
+
+.gpt-additional-input {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--gpt-border);
+  background: var(--gpt-surface);
+  color: var(--gpt-text);
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
 }
 
 .gpt-topbar-center {
