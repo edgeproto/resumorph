@@ -83,20 +83,30 @@ export function Sidebar() {
                 Create a profile…
               </button>
             ) : (
-              <select
-                id="sidebar-profile"
-                className="gpt-profile-select"
-                value={profileId}
-                onChange={(e) => selectProfile(e.target.value)}
-              >
-                <option value="">Select profile…</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {!p.parsedJson ? " (no resume)" : ""}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  id="sidebar-profile"
+                  className="gpt-profile-select"
+                  value={profileId}
+                  onChange={(e) => selectProfile(e.target.value)}
+                >
+                  <option value="">Select profile…</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {!p.parsedJson ? " (no resume)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="gpt-new-chat gpt-new-chat-secondary"
+                  style={{ marginTop: "0.35rem" }}
+                  onClick={() => setShowCreateProfile(true)}
+                >
+                  + New profile
+                </button>
+              </>
             )}
             {selectedProfile && (
               <p className="gpt-profile-meta muted small">
@@ -148,7 +158,10 @@ export function Sidebar() {
       </aside>
 
       {showCreateProfile && (
-        <CreateProfileModal onClose={() => setShowCreateProfile(false)} />
+        <CreateProfileModal
+          onClose={() => setShowCreateProfile(false)}
+          onCreated={(id) => navigate(`/?profile=${id}`)}
+        />
       )}
     </>
   );
