@@ -830,6 +830,92 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .preset-item-header { display: flex; justify-content: space-between; align-items: center; }
 .preset-editor { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--gpt-border); }
 
+.settings-page .settings-section-header h3 {
+  margin: 0 0 0.35rem;
+}
+
+.settings-section-desc {
+  margin: 0 0 1rem;
+  color: var(--gpt-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.settings-keys .settings-section-desc {
+  margin-bottom: 0.5rem;
+}
+
+.settings-prompt-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-prompt-card {
+  border: 1px solid var(--gpt-border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--gpt-main);
+}
+
+.settings-prompt-card h4 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  color: var(--gpt-accent);
+}
+
+.settings-prompt-card .prompt-editor {
+  margin-top: 0.75rem;
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-advanced {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-advanced > summary {
+  padding: 1.25rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1rem;
+  list-style: none;
+  user-select: none;
+}
+
+.settings-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.5rem;
+  color: var(--gpt-muted);
+  transition: transform 0.15s ease;
+}
+
+.settings-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.settings-advanced-body {
+  padding: 0 1.25rem 1.25rem;
+  border-top: 1px solid var(--gpt-border);
+}
+
+.settings-advanced-block + .settings-advanced-block {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--gpt-border);
+}
+
+.settings-advanced-block h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
 .prompt-editor { margin-top: 1rem; border-top: 1px solid var(--gpt-border); padding-top: 1rem; }
 .variable-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
 .chip { padding: 0.2rem 0.5rem; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--gpt-border); background: var(--gpt-main); color: var(--gpt-accent); cursor: pointer; }

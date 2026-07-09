@@ -6,7 +6,7 @@ interface PromptEditorProps {
   userPrompt: string;
   onSystemChange: (value: string) => void;
   onUserChange: (value: string) => void;
-  mode: "tailor" | "qa";
+  mode: "tailor" | "cover_letter" | "qa";
   readOnly?: boolean;
 }
 
@@ -46,8 +46,19 @@ export function PromptEditor({
   );
 
   const relevantVars = PROMPT_VARIABLES.filter((v) => {
+    if (mode === "qa") {
+      return [
+        "resume_text",
+        "resume_json",
+        "job_description",
+        "profile_name",
+        "user_question",
+        "job_title",
+        "company",
+      ].includes(v.key);
+    }
     if (mode === "tailor") return v.key !== "user_question";
-    return ["resume_text", "resume_json", "job_description", "profile_name", "user_question", "job_title", "company"].includes(v.key);
+    return v.key !== "user_question";
   });
 
   return (
