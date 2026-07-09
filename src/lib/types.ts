@@ -15,6 +15,7 @@ export interface Session {
   jobTitle: string | null;
   company: string | null;
   resumeJson: string | null;
+  chatType: string;
   createdAt: string;
 }
 
@@ -25,6 +26,7 @@ export interface UpdateSessionInput {
   company?: string | null;
   resumeJson?: string | null;
   clearResume?: boolean;
+  chatType?: string;
 }
 
 export interface Message {

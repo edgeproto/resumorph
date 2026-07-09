@@ -27,3 +27,4 @@ zip = "2"
 quick-xml = "0.37"
 pdf-extract = "0.8"
 regex = "1"
+reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false }

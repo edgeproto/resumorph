@@ -28,15 +28,28 @@ export const anthropicProvider: LLMProvider = {
       body.temperature = options.temperature;
     }
 
-    const response = await fetch(ANTHROPIC_API, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(body),
-    });
+    const url = options.baseUrl || ANTHROPIC_API;
+    const isBrowserProxy = url.startsWith("/api/");
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          ...(isBrowserProxy
+            ? { "anthropic-dangerous-direct-browser-access": "true" }
+            : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error(
+        `Network error calling Anthropic: ${(e as Error).message}. Restart the dev server if you just updated the app.`,
+      );
+    }
 
     if (!response.ok) {
       const err = await response.text();

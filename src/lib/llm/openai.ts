@@ -21,14 +21,21 @@ export const openaiProvider: LLMProvider = {
       body.response_format = { type: "json_object" };
     }
 
-    const response = await fetch(baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(baseUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error(
+        `Network error calling LLM: ${(e as Error).message}. Restart the dev server if you just updated the app.`,
+      );
+    }
 
     if (!response.ok) {
       const err = await response.text();

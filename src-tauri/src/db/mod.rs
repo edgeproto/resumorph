@@ -133,6 +133,7 @@ impl Database {
 
         seed_default_settings(&conn)?;
         migrate_sessions_resume_json(&conn)?;
+        migrate_sessions_chat_type(&conn)?;
 
         Ok(())
     }
@@ -204,6 +205,21 @@ fn migrate_sessions_resume_json(conn: &Connection) -> SqlResult<()> {
                 DEFAULT_SESSION_USER,
                 "session"
             ],
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_sessions_chat_type(conn: &Connection) -> SqlResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "chat_type") {
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN chat_type TEXT NOT NULL DEFAULT 'qa'",
+            [],
         )?;
     }
     Ok(())

@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api";
+import { isTauri } from "../lib/tauri";
 import {
   mergeDocxTemplate,
   tailoredToTemplateData,
@@ -10,10 +11,13 @@ import { useAppSettings } from "../lib/settings";
 
 export type ExportMode = "template" | "builtin";
 export type BuiltinTemplateId = "modern" | "classic" | "ats-friendly";
+export type ExportKind = "resume" | "cover_letter";
 
 interface ExportDialogProps {
   profileId: string;
-  tailored: TailoredResume;
+  tailored?: TailoredResume;
+  coverLetter?: string;
+  exportKind?: ExportKind;
   sessionId?: string;
   onClose: () => void;
 }
@@ -21,13 +25,17 @@ interface ExportDialogProps {
 export function ExportDialog({
   profileId,
   tailored,
+  coverLetter,
+  exportKind = "resume",
   sessionId,
   onClose,
 }: ExportDialogProps) {
-  const [exportMode, setExportMode] = useState<ExportMode>("template");
+  const isCoverLetter = exportKind === "cover_letter";
+  const letterText = coverLetter ?? tailored?.cover_letter ?? "";
+
+  const [exportMode, setExportMode] = useState<ExportMode>("builtin");
   const [builtinTemplate, setBuiltinTemplate] =
     useState<BuiltinTemplateId>("modern");
-  const [includeCoverLetter, setIncludeCoverLetter] = useState(false);
   const [alsoExportPdf, setAlsoExportPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,11 +52,61 @@ export function ExportDialog({
       profile?.templatePath
         ? api.detectDocxPlaceholders(profile.templatePath)
         : [],
-    enabled: !!profile?.templatePath && profile.sourceType === "docx",
+    enabled:
+      !isCoverLetter &&
+      !!profile?.templatePath &&
+      profile.sourceType === "docx",
   });
 
   const exportMutation = useMutation({
     mutationFn: async () => {
+      if (isCoverLetter) {
+        if (!letterText) throw new Error("No cover letter to export");
+        const baseName = `cover-letter-${Date.now()}`;
+
+        if (!isTauri()) {
+          const blob = new Blob([letterText], { type: "text/plain" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${baseName}.txt`;
+          a.click();
+          URL.revokeObjectURL(url);
+          return { docxPath: `${baseName}.txt` };
+        }
+
+        const templatePath = await api.getBuiltinTemplatePath("modern");
+        const templateBytes = new Uint8Array(
+          await api.readFileBytes(templatePath),
+        );
+        const merged = mergeDocxTemplate(templateBytes, {
+          name: profile?.name ?? "",
+          contact: "",
+          summary: letterText,
+          experience: "",
+          skills: "",
+          education: "",
+          cover_letter: letterText,
+        });
+        const docxPath = await api.saveExportFile(
+          Array.from(merged),
+          `${baseName}.docx`,
+          "docx",
+        );
+        if (!docxPath) return null;
+
+        if (alsoExportPdf) {
+          const pdfPath = await api.convertDocxToPdf(
+            docxPath,
+            settings?.pdfConverter,
+          );
+          return { docxPath, pdfPath };
+        }
+        return { docxPath, pdfPath: null };
+      }
+
+      if (!tailored) throw new Error("No tailored resume to export");
+
       const data = tailoredToTemplateData(tailored);
       let templatePath: string;
 
@@ -81,25 +139,6 @@ export function ExportDialog({
         });
       }
 
-      if (includeCoverLetter && tailored.cover_letter) {
-        const coverData = { cover_letter: tailored.cover_letter };
-        const coverMerged = mergeDocxTemplate(
-          new Uint8Array(await api.readFileBytes(templatePath)),
-          {
-          ...data,
-          summary: tailored.cover_letter,
-          experience: "",
-          skills: "",
-          education: "",
-          ...coverData,
-        });
-        await api.saveExportFile(
-          Array.from(coverMerged),
-          `${baseName}-cover-letter.docx`,
-          "docx",
-        );
-      }
-
       if (alsoExportPdf) {
         const pdfPath = await api.convertDocxToPdf(
           docxPath,
@@ -117,83 +156,85 @@ export function ExportDialog({
   });
 
   const canUseTemplate =
-    profile?.sourceType === "docx" && !!profile.templatePath;
+    !isCoverLetter &&
+    profile?.sourceType === "docx" &&
+    !!profile.templatePath;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-header">
-          <h3>Export resume</h3>
+          <h3>{isCoverLetter ? "Export cover letter" : "Export resume"}</h3>
           <button type="button" className="icon-btn" onClick={onClose}>
             ×
           </button>
         </header>
 
         <div className="modal-body">
-          <fieldset className="export-mode">
-            <legend>Template source</legend>
-            <label className="radio-label">
-              <input
-                type="radio"
-                name="exportMode"
-                checked={exportMode === "template"}
-                onChange={() => setExportMode("template")}
-                disabled={!canUseTemplate}
-              />
-              Original template (Mode A)
-              {!canUseTemplate && (
-                <span className="muted"> — requires DOCX upload</span>
+          {isCoverLetter ? (
+            <pre className="output preview-content">{letterText}</pre>
+          ) : (
+            <fieldset className="export-mode">
+              <legend>Template source</legend>
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="exportMode"
+                  checked={exportMode === "template"}
+                  onChange={() => setExportMode("template")}
+                  disabled={!canUseTemplate}
+                />
+                Original template (Mode A)
+                {!canUseTemplate && (
+                  <span className="muted"> — requires DOCX upload</span>
+                )}
+              </label>
+              {canUseTemplate && placeholders.length > 0 && (
+                <p className="muted small">
+                  Detected placeholders: {placeholders.join(", ")}
+                </p>
               )}
-            </label>
-            {canUseTemplate && placeholders.length > 0 && (
-              <p className="muted small">
-                Detected placeholders: {placeholders.join(", ")}
-              </p>
-            )}
-            <label className="radio-label">
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="exportMode"
+                  checked={exportMode === "builtin"}
+                  onChange={() => setExportMode("builtin")}
+                />
+                Built-in template (Mode C)
+              </label>
+              {exportMode === "builtin" && (
+                <select
+                  value={builtinTemplate}
+                  onChange={(e) =>
+                    setBuiltinTemplate(e.target.value as BuiltinTemplateId)
+                  }
+                >
+                  <option value="modern">Modern</option>
+                  <option value="classic">Classic</option>
+                  <option value="ats-friendly">ATS-friendly</option>
+                </select>
+              )}
+            </fieldset>
+          )}
+
+          {isTauri() && (
+            <label className="checkbox-label">
               <input
-                type="radio"
-                name="exportMode"
-                checked={exportMode === "builtin"}
-                onChange={() => setExportMode("builtin")}
+                type="checkbox"
+                checked={alsoExportPdf}
+                onChange={(e) => setAlsoExportPdf(e.target.checked)}
               />
-              Built-in template (Mode C)
+              Also export as PDF (Word COM or LibreOffice)
             </label>
-            {exportMode === "builtin" && (
-              <select
-                value={builtinTemplate}
-                onChange={(e) =>
-                  setBuiltinTemplate(e.target.value as BuiltinTemplateId)
-                }
-              >
-                <option value="modern">Modern</option>
-                <option value="classic">Classic</option>
-                <option value="ats-friendly">ATS-friendly</option>
-              </select>
-            )}
-          </fieldset>
+          )}
 
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={includeCoverLetter}
-              onChange={(e) => setIncludeCoverLetter(e.target.checked)}
-              disabled={!tailored.cover_letter}
-            />
-            Export cover letter separately
-            {!tailored.cover_letter && (
-              <span className="muted"> (no cover letter in output)</span>
-            )}
-          </label>
-
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={alsoExportPdf}
-              onChange={(e) => setAlsoExportPdf(e.target.checked)}
-            />
-            Also export as PDF (Word COM or LibreOffice)
-          </label>
+          {!isTauri() && isCoverLetter && (
+            <p className="muted small">
+              Browser preview exports as plain text. Use the desktop app for
+              DOCX/PDF.
+            </p>
+          )}
 
           {error && <p className="error">{error}</p>}
         </div>

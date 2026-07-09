@@ -1,6 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "./tauri";
 import {
+  webCreateMessage,
+  webCreateOutput,
+  webCreateProfile,
+  webCreateSession,
+  webDeleteProfile,
+  webGetProfile,
+  webGetSession,
+  webInitAppData,
+  webListMessages,
+  webListProfiles,
+  webListPromptPresets,
+  webListSessions,
+  webUpdateProfile,
+  webUpdateSession,
+} from "./webDb";
+import {
   webDeleteApiKey,
   webGetApiKey,
   webGetSettingsMap,
@@ -33,6 +49,7 @@ export interface CreateSessionInput {
   jobTitle?: string;
   company?: string;
   resumeJson?: string;
+  chatType?: string;
 }
 
 export interface CreatePromptPresetInput {
@@ -59,13 +76,23 @@ type CreateMessageInput = {
 };
 
 export const api = {
-  initAppData: () => invoke<AppDataInfo>("init_app_data"),
-  getAppDataInfo: () => invoke<AppDataInfo>("get_app_data_info"),
+  initAppData: () =>
+    isTauri() ? invoke<AppDataInfo>("init_app_data") : webInitAppData(),
+  getAppDataInfo: () =>
+    isTauri() ? invoke<AppDataInfo>("get_app_data_info") : webInitAppData(),
 
-  listProfiles: () => invoke<Profile[]>("list_profiles"),
-  getProfile: (id: string) => invoke<Profile>("get_profile", { id }),
+  listProfiles: () =>
+    isTauri()
+      ? invoke<Profile[]>("list_profiles")
+      : Promise.resolve(webListProfiles()),
+  getProfile: (id: string) =>
+    isTauri()
+      ? invoke<Profile>("get_profile", { id })
+      : Promise.resolve(webGetProfile(id)),
   createProfile: (input: CreateProfileInput) =>
-    invoke<Profile>("create_profile", { input }),
+    isTauri()
+      ? invoke<Profile>("create_profile", { input })
+      : Promise.resolve(webCreateProfile(input)),
   updateProfile: (
     id: string,
     fields: {
@@ -74,33 +101,70 @@ export const api = {
       templatePath?: string;
       parsedJson?: string;
     },
-  ) => invoke<Profile>("update_profile", { id, ...fields }),
-  deleteProfile: (id: string) => invoke<void>("delete_profile", { id }),
+  ) =>
+    isTauri()
+      ? invoke<Profile>("update_profile", { id, ...fields })
+      : Promise.resolve(webUpdateProfile(id, fields)),
+  deleteProfile: (id: string) =>
+    isTauri()
+      ? invoke<void>("delete_profile", { id })
+      : Promise.resolve(webDeleteProfile(id)),
 
   listSessions: (profileId?: string) =>
-    invoke<Session[]>("list_sessions", { profileId: profileId ?? null }),
-  getSession: (id: string) => invoke<Session>("get_session", { id }),
+    isTauri()
+      ? invoke<Session[]>("list_sessions", { profileId: profileId ?? null })
+      : Promise.resolve(webListSessions(profileId)),
+  getSession: (id: string) =>
+    isTauri()
+      ? invoke<Session>("get_session", { id })
+      : Promise.resolve(webGetSession(id)),
   createSession: (input: CreateSessionInput) =>
-    invoke<Session>("create_session", { input }),
+    isTauri()
+      ? invoke<Session>("create_session", { input })
+      : Promise.resolve(webCreateSession(input)),
   updateSession: (input: UpdateSessionInput) =>
-    invoke<Session>("update_session", { input }),
-  deleteSession: (id: string) => invoke<void>("delete_session", { id }),
+    isTauri()
+      ? invoke<Session>("update_session", { input })
+      : Promise.resolve(webUpdateSession(input)),
+  deleteSession: (id: string) =>
+    isTauri() ? invoke<void>("delete_session", { id }) : Promise.resolve(),
 
   listMessages: (sessionId: string) =>
-    invoke<Message[]>("list_messages", { sessionId }),
+    isTauri()
+      ? invoke<Message[]>("list_messages", { sessionId })
+      : Promise.resolve(webListMessages(sessionId)),
   createMessage: (input: CreateMessageInput) =>
-    invoke<Message>("create_message", { input }),
-  deleteMessage: (id: string) => invoke<void>("delete_message", { id }),
+    isTauri()
+      ? invoke<Message>("create_message", { input })
+      : Promise.resolve(webCreateMessage(input)),
+  deleteMessage: (id: string) =>
+    isTauri() ? invoke<void>("delete_message", { id }) : Promise.resolve(),
 
-  listPromptPresets: () => invoke<PromptPreset[]>("list_prompt_presets"),
+  listPromptPresets: () =>
+    isTauri()
+      ? invoke<PromptPreset[]>("list_prompt_presets")
+      : Promise.resolve(webListPromptPresets()),
   getPromptPreset: (id: string) =>
-    invoke<PromptPreset>("get_prompt_preset", { id }),
+    isTauri()
+      ? invoke<PromptPreset>("get_prompt_preset", { id })
+      : (() => {
+          const preset = webListPromptPresets().find((p) => p.id === id);
+          return preset
+            ? Promise.resolve(preset)
+            : Promise.reject(new Error("Preset not found"));
+        })(),
   createPromptPreset: (input: CreatePromptPresetInput) =>
-    invoke<PromptPreset>("create_prompt_preset", { input }),
+    isTauri()
+      ? invoke<PromptPreset>("create_prompt_preset", { input })
+      : Promise.reject(new Error("Not available in browser preview")),
   updatePromptPreset: (input: UpdatePromptPresetInput) =>
-    invoke<PromptPreset>("update_prompt_preset", { input }),
+    isTauri()
+      ? invoke<PromptPreset>("update_prompt_preset", { input })
+      : Promise.reject(new Error("Not available in browser preview")),
   deletePromptPreset: (id: string) =>
-    invoke<void>("delete_prompt_preset", { id }),
+    isTauri()
+      ? invoke<void>("delete_prompt_preset", { id })
+      : Promise.reject(new Error("Not available in browser preview")),
 
   setApiKey: (provider: string, apiKey: string) =>
     isTauri()
@@ -124,11 +188,19 @@ export const api = {
       : Promise.resolve(webListApiKeyStatus()),
 
   pickAndIngestResume: (profileId: string) =>
-    invoke<IngestResult | null>("pick_and_ingest_resume", { profileId }),
+    isTauri()
+      ? invoke<IngestResult | null>("pick_and_ingest_resume", { profileId })
+      : Promise.reject(
+          new Error("File upload requires the desktop app (npm run tauri dev)"),
+        ),
   ingestResumeFile: (profileId: string, filePath: string) =>
-    invoke<IngestResult>("ingest_resume_file", { profileId, filePath }),
+    isTauri()
+      ? invoke<IngestResult>("ingest_resume_file", { profileId, filePath })
+      : Promise.reject(new Error("Not available in browser preview")),
   getProfileResumeText: (profileId: string) =>
-    invoke<ParsedResume>("get_profile_resume_text", { profileId }),
+    isTauri()
+      ? invoke<ParsedResume>("get_profile_resume_text", { profileId })
+      : Promise.reject(new Error("Not available in browser preview")),
 
   getSetting: (key: string) =>
     isTauri()
@@ -144,25 +216,69 @@ export const api = {
       : Promise.resolve(webGetSettingsMap()),
 
   readFileBytes: (path: string) =>
-    invoke<number[]>("read_file_bytes", { path }),
+    isTauri()
+      ? invoke<number[]>("read_file_bytes", { path })
+      : Promise.reject(new Error("Not available in browser preview")),
   saveExportFile: (data: number[], defaultName: string, fileType: string) =>
-    invoke<string | null>("save_export_file", { data, defaultName, fileType }),
+    isTauri()
+      ? invoke<string | null>("save_export_file", { data, defaultName, fileType })
+      : webSaveFile(data, defaultName, fileType),
   detectDocxPlaceholders: (path: string) =>
-    invoke<string[]>("detect_docx_placeholders", { path }),
+    isTauri()
+      ? invoke<string[]>("detect_docx_placeholders", { path })
+      : Promise.resolve([]),
   getBuiltinTemplatePath: (templateId: string) =>
-    invoke<string>("get_builtin_template_path", { templateId }),
-  listBuiltinTemplates: () => invoke<string[]>("list_builtin_templates"),
+    isTauri()
+      ? invoke<string>("get_builtin_template_path", { templateId })
+      : Promise.reject(new Error("Export requires the desktop app")),
+  listBuiltinTemplates: () =>
+    isTauri()
+      ? invoke<string[]>("list_builtin_templates")
+      : Promise.resolve(["modern", "classic", "ats-friendly"]),
   injectDocxPlaceholders: (profileId: string, placeholders: string[]) =>
-    invoke<string>("inject_docx_placeholders", { profileId, placeholders }),
+    isTauri()
+      ? invoke<string>("inject_docx_placeholders", { profileId, placeholders })
+      : Promise.reject(new Error("Not available in browser preview")),
   convertDocxToPdf: (docxPath: string, converter?: string) =>
-    invoke<string>("convert_docx_to_pdf", { docxPath, converter: converter ?? null }),
+    isTauri()
+      ? invoke<string>("convert_docx_to_pdf", {
+          docxPath,
+          converter: converter ?? null,
+        })
+      : Promise.reject(new Error("PDF export requires the desktop app")),
 
   createOutput: (input: CreateOutputInput) =>
-    invoke<Output>("create_output", { input }),
-  getOutput: (id: string) => invoke<Output>("get_output", { id }),
+    isTauri()
+      ? invoke<Output>("create_output", { input })
+      : Promise.resolve(webCreateOutput(input)),
+  getOutput: (id: string) =>
+    isTauri()
+      ? invoke<Output>("get_output", { id })
+      : Promise.reject(new Error("Not available in browser preview")),
   listOutputs: (sessionId: string) =>
-    invoke<Output[]>("list_outputs", { sessionId }),
+    isTauri()
+      ? invoke<Output[]>("list_outputs", { sessionId })
+      : Promise.resolve([]),
 };
+
+function webSaveFile(
+  data: number[],
+  defaultName: string,
+  fileType: string,
+): Promise<string | null> {
+  const mime =
+    fileType === "pdf"
+      ? "application/pdf"
+      : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const blob = new Blob([new Uint8Array(data)], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return Promise.resolve(defaultName);
+}
 
 export function parseProfileResume(profile: Profile): ParsedResume | null {
   if (!profile.parsedJson) return null;

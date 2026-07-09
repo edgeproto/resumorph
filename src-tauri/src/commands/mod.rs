@@ -2,6 +2,7 @@ pub mod app_data;
 pub mod export;
 pub mod jd;
 pub mod keys;
+pub mod llm;
 pub mod messages;
 pub mod profiles;
 pub mod prompt_presets;

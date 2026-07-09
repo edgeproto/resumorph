@@ -13,6 +13,7 @@ pub struct Session {
     pub job_title: Option<String>,
     pub company: Option<String>,
     pub resume_json: Option<String>,
+    pub chat_type: String,
     pub created_at: String,
 }
 
@@ -24,6 +25,7 @@ pub struct CreateSessionInput {
     pub job_title: Option<String>,
     pub company: Option<String>,
     pub resume_json: Option<String>,
+    pub chat_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,7 @@ pub struct UpdateSessionInput {
     pub company: Option<String>,
     pub resume_json: Option<String>,
     pub clear_resume: Option<bool>,
+    pub chat_type: Option<String>,
 }
 
 #[tauri::command]
@@ -45,12 +48,12 @@ pub fn list_sessions(
     db.with_conn(|conn| {
         let (sql, params): (String, Vec<String>) = match profile_id {
             Some(pid) => (
-                "SELECT id, profile_id, job_description, job_title, company, resume_json, created_at
+                "SELECT id, profile_id, job_description, job_title, company, resume_json, chat_type, created_at
                  FROM sessions WHERE profile_id = ?1 ORDER BY created_at DESC".into(),
                 vec![pid],
             ),
             None => (
-                "SELECT id, profile_id, job_description, job_title, company, resume_json, created_at
+                "SELECT id, profile_id, job_description, job_title, company, resume_json, chat_type, created_at
                  FROM sessions ORDER BY created_at DESC".into(),
                 vec![],
             ),
@@ -75,7 +78,8 @@ fn map_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         job_title: row.get(3)?,
         company: row.get(4)?,
         resume_json: row.get(5)?,
-        created_at: row.get(6)?,
+        chat_type: row.get(6)?,
+        created_at: row.get(7)?,
     })
 }
 
@@ -83,7 +87,7 @@ fn map_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
 pub fn get_session(db: State<'_, Database>, id: String) -> Result<Session, String> {
     db.with_conn(|conn| {
         conn.query_row(
-            "SELECT id, profile_id, job_description, job_title, company, resume_json, created_at
+            "SELECT id, profile_id, job_description, job_title, company, resume_json, chat_type, created_at
              FROM sessions WHERE id = ?1",
             [&id],
             map_session,
@@ -100,10 +104,12 @@ pub fn create_session(
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
+    let chat_type = input.chat_type.unwrap_or_else(|| "qa".to_string());
+
     db.with_conn(|conn| {
         conn.execute(
-            "INSERT INTO sessions (id, profile_id, job_description, job_title, company, resume_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO sessions (id, profile_id, job_description, job_title, company, resume_json, chat_type, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 &id,
                 &input.profile_id,
@@ -111,6 +117,7 @@ pub fn create_session(
                 &input.job_title,
                 &input.company,
                 &input.resume_json,
+                &chat_type,
                 &now
             ],
         )?;
@@ -136,11 +143,12 @@ pub fn update_session(
     } else {
         input.resume_json.or(existing.resume_json)
     };
+    let chat_type = input.chat_type.unwrap_or(existing.chat_type);
 
     db.with_conn(|conn| {
         conn.execute(
-            "UPDATE sessions SET job_description = ?1, job_title = ?2, company = ?3, resume_json = ?4 WHERE id = ?5",
-            rusqlite::params![&job_description, &job_title, &company, &resume_json, &input.id],
+            "UPDATE sessions SET job_description = ?1, job_title = ?2, company = ?3, resume_json = ?4, chat_type = ?5 WHERE id = ?6",
+            rusqlite::params![&job_description, &job_title, &company, &resume_json, &chat_type, &input.id],
         )?;
         Ok(())
     })

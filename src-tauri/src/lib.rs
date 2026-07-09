@@ -9,6 +9,7 @@ use commands::app_data::{ensure_app_dirs, get_app_data_info, init_app_data};
 use commands::keys::{
     delete_api_key, get_api_key, has_api_key, list_api_key_status, set_api_key,
 };
+use commands::llm::complete_llm;
 use commands::messages::{create_message, delete_message, list_messages};
 use commands::profiles::{
     create_profile, delete_profile, get_profile, list_profiles, update_profile,
@@ -72,6 +73,7 @@ pub fn run() {
             delete_api_key,
             has_api_key,
             list_api_key_status,
+            complete_llm,
             ingest_resume_file,
             pick_and_ingest_resume,
             get_profile_resume_text,

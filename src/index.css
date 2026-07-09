@@ -76,6 +76,110 @@ body {
   background: var(--gpt-surface);
 }
 
+.gpt-profile-picker {
+  margin-top: 0.75rem;
+  padding: 0 0.25rem;
+}
+
+.gpt-profile-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gpt-muted);
+  margin-bottom: 0.35rem;
+}
+
+.gpt-profile-select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--gpt-border);
+  background: var(--gpt-surface);
+  color: var(--gpt-text);
+  font-size: 0.875rem;
+}
+
+.gpt-profile-empty {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px dashed var(--gpt-border);
+  background: transparent;
+  color: var(--gpt-muted);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gpt-profile-empty:hover {
+  background: var(--gpt-surface);
+  color: var(--gpt-text);
+}
+
+.gpt-profile-meta {
+  margin: 0.35rem 0 0;
+  padding: 0 0.15rem;
+}
+
+.gpt-topbar {
+  justify-content: space-between;
+}
+
+.gpt-topbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.gpt-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gpt-mode-select {
+  padding: 0.45rem 2rem 0.45rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--gpt-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%239b9b9b'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+}
+
+.gpt-mode-select:hover:not(:disabled) {
+  background-color: var(--gpt-surface);
+  border-color: var(--gpt-border);
+}
+
+.gpt-mode-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gpt-export-btn {
+  font-size: 0.85rem;
+  padding: 0.45rem 0.9rem;
+}
+
+.gpt-export-hint {
+  max-width: 768px;
+  margin: 0 auto 0.5rem;
+  text-align: center;
+}
+
+.gpt-link-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .gpt-new-chat-secondary {
   border-style: dashed;
   opacity: 0.85;
