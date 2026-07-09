@@ -1,60 +1,50 @@
 import { useQuery } from "@tanstack/react-query";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { jdLabel } from "../lib/jd";
+import { sessionLabel } from "../lib/sessions";
 
 const navItems = [
-  { to: "/tailor", label: "Tailor resume", icon: "✦" },
-  { to: "/chat", label: "Q&A chat", icon: "💬" },
   { to: "/profiles", label: "Profiles", icon: "👤" },
   { to: "/settings", label: "Settings", icon: "⚙" },
 ];
 
 export function Sidebar() {
-  const location = useLocation();
-  const showSessions =
-    location.pathname === "/chat" || location.pathname === "/tailor";
+  const [searchParams] = useSearchParams();
+  const profileId = searchParams.get("profile") ?? "";
+  const activeSessionId = searchParams.get("session") ?? "";
 
   const { data: sessions = [] } = useQuery({
-    queryKey: ["sessions"],
-    queryFn: () => api.listSessions(),
-    enabled: showSessions,
+    queryKey: ["sessions", profileId],
+    queryFn: () => api.listSessions(profileId),
+    enabled: !!profileId,
   });
 
   return (
     <aside className="gpt-sidebar">
       <div className="gpt-sidebar-top">
         <div className="gpt-brand">Resumorph</div>
-        <NavLink to="/tailor" className="gpt-new-chat">
-          + New tailor
-        </NavLink>
-        <NavLink to="/chat" className="gpt-new-chat gpt-new-chat-secondary">
-          + New chat
+        <NavLink
+          to={profileId ? `/?profile=${profileId}` : "/"}
+          className="gpt-new-chat"
+        >
+          + New session
         </NavLink>
       </div>
 
-      {showSessions && sessions.length > 0 && (
+      {profileId && (
         <div className="gpt-history">
-          <p className="gpt-history-label">Recent</p>
+          <p className="gpt-history-label">Sessions</p>
+          {sessions.length === 0 && (
+            <p className="muted small gpt-history-empty">No sessions yet</p>
+          )}
           <ul className="gpt-history-list">
-            {sessions.slice(0, 20).map((s) => (
+            {sessions.map((s) => (
               <li key={s.id}>
                 <NavLink
-                  to={
-                    location.pathname === "/tailor"
-                      ? `/tailor?session=${s.id}`
-                      : `/chat?session=${s.id}`
-                  }
-                  className="gpt-history-item"
+                  to={`/?profile=${profileId}&session=${s.id}`}
+                  className={`gpt-history-item${activeSessionId === s.id ? " active" : ""}`}
                 >
-                  {s.jobTitle && s.company
-                    ? `${s.jobTitle} @ ${s.company}`
-                    : s.jobTitle || s.company || jdLabel({
-                        text: s.jobDescription ?? "",
-                        jobTitle: s.jobTitle,
-                        company: s.company,
-                        sourceType: "text",
-                      }).slice(0, 40) || "Untitled"}
+                  {sessionLabel(s)}
                 </NavLink>
               </li>
             ))}
@@ -62,12 +52,17 @@ export function Sidebar() {
         </div>
       )}
 
+      {!profileId && (
+        <p className="muted small gpt-sidebar-hint">
+          Select a profile to see session history.
+        </p>
+      )}
+
       <nav className="gpt-sidebar-nav">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.end}
             className={({ isActive }) =>
               isActive ? "gpt-nav-link active" : "gpt-nav-link"
             }

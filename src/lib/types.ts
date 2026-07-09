@@ -14,7 +14,17 @@ export interface Session {
   jobDescription: string | null;
   jobTitle: string | null;
   company: string | null;
+  resumeJson: string | null;
   createdAt: string;
+}
+
+export interface UpdateSessionInput {
+  id: string;
+  jobDescription?: string | null;
+  jobTitle?: string | null;
+  company?: string | null;
+  resumeJson?: string | null;
+  clearResume?: boolean;
 }
 
 export interface Message {

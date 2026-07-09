@@ -51,6 +51,7 @@ impl Database {
                 job_description TEXT,
                 job_title TEXT,
                 company TEXT,
+                resume_json TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
@@ -131,6 +132,7 @@ impl Database {
         }
 
         seed_default_settings(&conn)?;
+        migrate_sessions_resume_json(&conn)?;
 
         Ok(())
     }
@@ -166,6 +168,46 @@ Resume:\n{{resume_text}}\n\n\
 Structured sections:\n{{resume_json}}\n\n\
 Job description:\n{{job_description}}\n\n\
 Question: {{user_question}}";
+
+const DEFAULT_SESSION_SYSTEM: &str = "You are an expert career assistant for job applications. \
+You help tailor resumes, write cover letters, answer application questions, and identify gaps. \
+Never fabricate experience or skills. Use the resume and job description provided in context. \
+Reference earlier messages in this conversation when relevant. \
+When asked to tailor a resume, respond with valid JSON only (keys: name, contact, summary, experience as array of {title, company, bullets}, skills, education, cover_letter optional). \
+Otherwise respond in clear, professional prose.";
+
+const DEFAULT_SESSION_USER: &str = "{{user_question}}";
+
+fn migrate_sessions_resume_json(conn: &Connection) -> SqlResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "resume_json") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN resume_json TEXT", [])?;
+    }
+
+    let session_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM prompt_presets WHERE mode = 'session'",
+        [],
+        |row| row.get(0),
+    )?;
+    if session_count == 0 {
+        conn.execute(
+            "INSERT INTO prompt_presets (id, name, system_prompt, user_prompt, mode, is_default)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+            rusqlite::params![
+                uuid::Uuid::new_v4().to_string(),
+                "Default Session",
+                DEFAULT_SESSION_SYSTEM,
+                DEFAULT_SESSION_USER,
+                "session"
+            ],
+        )?;
+    }
+    Ok(())
+}
 
 fn seed_default_settings(conn: &Connection) -> SqlResult<()> {
     let defaults = [

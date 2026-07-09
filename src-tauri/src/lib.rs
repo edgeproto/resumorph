@@ -24,6 +24,9 @@ use commands::export::{
 };
 use commands::jd::{parse_jd_from_file, parse_jd_from_text, pick_and_parse_jd};
 use commands::resume::{get_profile_resume_text, ingest_resume_file, pick_and_ingest_resume};
+use commands::resume_parse::{
+    parse_resume_from_file, parse_resume_from_text, pick_and_parse_resume,
+};
 use commands::sessions::{
     create_session, delete_session, get_session, list_sessions, update_session,
 };
@@ -89,6 +92,9 @@ pub fn run() {
             parse_jd_from_text,
             parse_jd_from_file,
             pick_and_parse_jd,
+            parse_resume_from_text,
+            parse_resume_from_file,
+            pick_and_parse_resume,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

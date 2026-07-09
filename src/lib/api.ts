@@ -1,4 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "./tauri";
+import {
+  webDeleteApiKey,
+  webGetApiKey,
+  webGetSettingsMap,
+  webListApiKeyStatus,
+  webSetApiKey,
+  webSetSetting,
+} from "./webStore";
 import type {
   ApiKeyStatus,
   AppDataInfo,
@@ -10,6 +19,7 @@ import type {
   Profile,
   PromptPreset,
   Session,
+  UpdateSessionInput,
 } from "./types";
 
 // Re-export input types used by API
@@ -22,6 +32,7 @@ export interface CreateSessionInput {
   jobDescription?: string;
   jobTitle?: string;
   company?: string;
+  resumeJson?: string;
 }
 
 export interface CreatePromptPresetInput {
@@ -71,14 +82,8 @@ export const api = {
   getSession: (id: string) => invoke<Session>("get_session", { id }),
   createSession: (input: CreateSessionInput) =>
     invoke<Session>("create_session", { input }),
-  updateSession: (
-    id: string,
-    fields: {
-      jobDescription?: string;
-      jobTitle?: string;
-      company?: string;
-    },
-  ) => invoke<Session>("update_session", { id, ...fields }),
+  updateSession: (input: UpdateSessionInput) =>
+    invoke<Session>("update_session", { input }),
   deleteSession: (id: string) => invoke<void>("delete_session", { id }),
 
   listMessages: (sessionId: string) =>
@@ -98,13 +103,25 @@ export const api = {
     invoke<void>("delete_prompt_preset", { id }),
 
   setApiKey: (provider: string, apiKey: string) =>
-    invoke<void>("set_api_key", { provider, apiKey }),
-  getApiKey: (provider: string) => invoke<string>("get_api_key", { provider }),
+    isTauri()
+      ? invoke<void>("set_api_key", { provider, apiKey })
+      : Promise.resolve(webSetApiKey(provider, apiKey)),
+  getApiKey: (provider: string) =>
+    isTauri()
+      ? invoke<string>("get_api_key", { provider })
+      : Promise.resolve(webGetApiKey(provider)),
   deleteApiKey: (provider: string) =>
-    invoke<void>("delete_api_key", { provider }),
+    isTauri()
+      ? invoke<void>("delete_api_key", { provider })
+      : Promise.resolve(webDeleteApiKey(provider)),
   hasApiKey: (provider: string) =>
-    invoke<boolean>("has_api_key", { provider }),
-  listApiKeyStatus: () => invoke<ApiKeyStatus[]>("list_api_key_status"),
+    isTauri()
+      ? invoke<boolean>("has_api_key", { provider })
+      : Promise.resolve(!!webGetApiKey(provider)),
+  listApiKeyStatus: () =>
+    isTauri()
+      ? invoke<ApiKeyStatus[]>("list_api_key_status")
+      : Promise.resolve(webListApiKeyStatus()),
 
   pickAndIngestResume: (profileId: string) =>
     invoke<IngestResult | null>("pick_and_ingest_resume", { profileId }),
@@ -113,11 +130,18 @@ export const api = {
   getProfileResumeText: (profileId: string) =>
     invoke<ParsedResume>("get_profile_resume_text", { profileId }),
 
-  getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
+  getSetting: (key: string) =>
+    isTauri()
+      ? invoke<string | null>("get_setting", { key })
+      : Promise.resolve(webGetSettingsMap()[key] ?? null),
   setSetting: (key: string, value: string) =>
-    invoke<void>("set_setting", { key, value }),
+    isTauri()
+      ? invoke<void>("set_setting", { key, value })
+      : Promise.resolve(webSetSetting(key, value)),
   getSettingsMap: () =>
-    invoke<Record<string, string>>("get_settings_map"),
+    isTauri()
+      ? invoke<Record<string, string>>("get_settings_map")
+      : Promise.resolve(webGetSettingsMap()),
 
   readFileBytes: (path: string) =>
     invoke<number[]>("read_file_bytes", { path }),

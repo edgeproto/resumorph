@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { PromptEditor } from "../components/PromptEditor";
 import { api } from "../lib/api";
-import { saveAppSettings, useAppSettings } from "../lib/settings";
+import { saveAppSettings, DEFAULT_SETTINGS, useAppSettings } from "../lib/settings";
+import { isTauri } from "../lib/tauri";
 import type { AppSettings, LlmProviderId } from "../lib/types";
 
 const PROVIDERS: { id: LlmProviderId; label: string }[] = [
@@ -13,10 +14,10 @@ const PROVIDERS: { id: LlmProviderId; label: string }[] = [
 
 export function Settings() {
   const queryClient = useQueryClient();
-  const { data: settings, isLoading: settingsLoading } = useAppSettings();
+  const { data: settings } = useAppSettings();
 
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
-  const [form, setForm] = useState<AppSettings | null>(null);
+  const [form, setForm] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const [presetSystem, setPresetSystem] = useState("");
   const [presetUser, setPresetUser] = useState("");
@@ -25,16 +26,19 @@ export function Settings() {
   const { data: appData } = useQuery({
     queryKey: ["appData"],
     queryFn: api.getAppDataInfo,
+    enabled: isTauri(),
   });
 
-  const { data: keyStatus = [] } = useQuery({
+  const { data: keyStatus = [], refetch: refetchKeyStatus } = useQuery({
     queryKey: ["apiKeyStatus"],
     queryFn: api.listApiKeyStatus,
+    retry: isTauri() ? 3 : 0,
   });
 
   const { data: presets = [] } = useQuery({
     queryKey: ["promptPresets"],
     queryFn: api.listPromptPresets,
+    enabled: isTauri(),
   });
 
   useEffect(() => {
@@ -46,6 +50,7 @@ export function Settings() {
       api.setApiKey(provider, key),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["apiKeyStatus"] });
+      refetchKeyStatus();
       setKeyInputs({});
     },
   });
@@ -90,20 +95,26 @@ export function Settings() {
     setPresetUser(preset.userPrompt);
   }
 
-  if (settingsLoading || !form) {
-    return (
-      <div className="page">
-        <p className="muted">Loading settings...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="page">
       <header className="page-header">
         <h2>Settings</h2>
-        <p>API keys are stored in your OS keychain, never in the database.</p>
+        <p>
+          Add your LLM API keys here — stored in your OS keychain, never in the
+          database. You need at least one key before chatting or tailoring.
+        </p>
       </header>
+
+      {!isTauri() && (
+        <section className="card info-box">
+          <strong>Browser preview mode</strong>
+          <p className="muted small" style={{ margin: "0.5rem 0 0" }}>
+            API keys and preferences are saved in this browser&apos;s
+            localStorage. Profiles and chat require the desktop app (
+            <code>npm run tauri dev</code>).
+          </p>
+        </section>
+      )}
 
       <section className="card">
         <h3>Data directory</h3>
@@ -116,8 +127,10 @@ export function Settings() {
             <dt>Profiles</dt>
             <dd className="mono">{appData.profilesDir}</dd>
           </dl>
-        ) : (
+        ) : isTauri() ? (
           <p className="muted">Loading...</p>
+        ) : (
+          <p className="muted">Available in the desktop app only.</p>
         )}
       </section>
 

@@ -6,5 +6,6 @@ pub mod messages;
 pub mod profiles;
 pub mod prompt_presets;
 pub mod resume;
+pub mod resume_parse;
 pub mod sessions;
 pub mod settings;

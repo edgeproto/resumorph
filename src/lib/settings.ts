@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import { isTauri } from "./tauri";
 import type { AppSettings, LlmProviderId } from "./types";
 
 const DEFAULTS: AppSettings = {
@@ -35,6 +36,8 @@ export function useAppSettings() {
       const map = await api.getSettingsMap();
       return parseSettingsMap(map);
     },
+    initialData: DEFAULTS,
+    retry: isTauri() ? 3 : 0,
   });
 }
 

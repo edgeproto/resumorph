@@ -1,13 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { PlaceholderWizard } from "../components/PlaceholderWizard";
-import { api, parseProfileResume } from "../lib/api";
+import { ResumeInput } from "../components/ResumeInput";
+import { api } from "../lib/api";
+import type { ParsedResume } from "../lib/types";
 
 export function Profiles() {
   const queryClient = useQueryClient();
-  const [newName, setNewName] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [resume, setResume] = useState<ParsedResume | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
   const [wizardProfileId, setWizardProfileId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const { data: profiles = [], isLoading } = useQuery({
     queryKey: ["profiles"],
@@ -15,10 +21,31 @@ export function Profiles() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (name: string) => api.createProfile({ name }),
+    mutationFn: async () => {
+      if (!title.trim()) throw new Error("Title is required");
+      if (!resume) throw new Error("Resume is required");
+      const profile = await api.createProfile({ name: title.trim() });
+      return api.updateProfile(profile.id, {
+        parsedJson: JSON.stringify(resume),
+        sourceType: "text",
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      setNewName("");
+      setTitle("");
+      setResume(null);
+      setError(null);
+    },
+    onError: (e) => setError((e as Error).message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      await api.updateProfile(id, { name });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      setEditingId(null);
     },
   });
 
@@ -36,112 +63,132 @@ export function Profiles() {
     <div className="page">
       <header className="page-header">
         <h2>Profiles</h2>
-        <p>Create a profile for each resume persona. Upload once, reuse everywhere.</p>
+        <p>
+          Each profile needs a <strong>title</strong> and <strong>resume</strong>.
+          Use them across application sessions.
+        </p>
       </header>
 
       <section className="card">
         <h3>New profile</h3>
-        <form
-          className="inline-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (newName.trim()) createMutation.mutate(newName.trim());
-          }}
-        >
+        <label>
+          Title
           <input
             type="text"
             placeholder="e.g. Software Engineer — 2026"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
           />
-          <button type="submit" disabled={createMutation.isPending}>
-            Create
-          </button>
-        </form>
+        </label>
+        <ResumeInput value={resume} onChange={setResume} label="Resume" />
+        <button
+          type="button"
+          disabled={createMutation.isPending || !title.trim() || !resume}
+          onClick={() => createMutation.mutate()}
+        >
+          {createMutation.isPending ? "Creating..." : "Create profile"}
+        </button>
+        {error && <p className="error">{error}</p>}
       </section>
 
       <section className="card">
         <h3>Your profiles</h3>
         {isLoading && <p className="muted">Loading...</p>}
         {!isLoading && profiles.length === 0 && (
-          <p className="muted">No profiles yet. Create one above.</p>
+          <p className="muted">No profiles yet.</p>
         )}
         <ul className="profile-list">
-          {profiles.map((profile) => {
-            const parsed = parseProfileResume(profile);
-            const isExpanded = expandedId === profile.id;
-            return (
-              <li key={profile.id} className="profile-item">
-                <div className="profile-item-header">
+          {profiles.map((profile) => (
+            <li key={profile.id} className="profile-item">
+              <div className="profile-item-header">
+                {editingId === profile.id ? (
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                  />
+                ) : (
                   <div>
                     <strong>{profile.name}</strong>
-                    <span className="badge">{profile.sourceType}</span>
-                  </div>
-                  <div className="profile-actions">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedId(isExpanded ? null : profile.id)
-                      }
-                    >
-                      {isExpanded ? "Hide" : "Details"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => ingestMutation.mutate(profile.id)}
-                      disabled={ingestMutation.isPending}
-                    >
-                      {profile.templatePath ? "Re-upload" : "Upload resume"}
-                    </button>
-                    {profile.sourceType === "docx" && profile.templatePath && (
-                      <button
-                        type="button"
-                        onClick={() => setWizardProfileId(profile.id)}
-                      >
-                        Placeholder wizard
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="danger"
-                      onClick={() => {
-                        if (confirm(`Delete profile "${profile.name}"?`)) {
-                          deleteMutation.mutate(profile.id);
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                {isExpanded && (
-                  <div className="profile-details">
-                    <p className="muted">
-                      Updated {new Date(profile.updatedAt).toLocaleString()}
-                    </p>
-                    {profile.templatePath && (
-                      <p className="mono">{profile.templatePath}</p>
-                    )}
-                    {parsed && (
-                      <div className="sections-preview">
-                        <h4>Parsed sections</h4>
-                        {parsed.sections.map((s) => (
-                          <details key={s.name}>
-                            <summary>{s.name}</summary>
-                            <pre>{s.content}</pre>
-                          </details>
-                        ))}
-                      </div>
-                    )}
+                    <span className="badge">
+                      {profile.parsedJson ? profile.sourceType : "no resume"}
+                    </span>
                   </div>
                 )}
-              </li>
-            );
-          })}
+                <div className="profile-actions">
+                  {editingId === profile.id ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateMutation.mutate({
+                            id: profile.id,
+                            name: editTitle,
+                          })
+                        }
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => setEditingId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Link
+                        to={`/?profile=${profile.id}`}
+                        className="btn-ghost"
+                        style={{ textDecoration: "none" }}
+                      >
+                        Sessions
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(profile.id);
+                          setEditTitle(profile.name);
+                        }}
+                      >
+                        Edit title
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => ingestMutation.mutate(profile.id)}
+                        disabled={ingestMutation.isPending}
+                      >
+                        {profile.parsedJson ? "Replace resume" : "Upload resume"}
+                      </button>
+                      {profile.sourceType === "docx" &&
+                        profile.templatePath && (
+                          <button
+                            type="button"
+                            onClick={() => setWizardProfileId(profile.id)}
+                          >
+                            Placeholders
+                          </button>
+                        )}
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => {
+                          if (confirm(`Delete "${profile.name}"?`)) {
+                            deleteMutation.mutate(profile.id);
+                          }
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </li>
+          ))}
         </ul>
-        {ingestMutation.isError && (
-          <p className="error">{(ingestMutation.error as Error).message}</p>
-        )}
       </section>
 
       {wizardProfileId && (
