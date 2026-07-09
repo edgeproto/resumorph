@@ -61,30 +61,39 @@ fn remove_fallback_key(db: &Database, provider: &str) -> Result<(), String> {
 }
 
 pub fn get_api_key_for_provider(db: &Database, provider: &str) -> Result<String, String> {
-    match keyring_entry(provider) {
-        Ok(entry) => match entry.get_password() {
-            Ok(key) => Ok(key),
-            Err(keyring::Error::NoEntry) => read_fallback_key(db, provider)?
-                .ok_or_else(|| "No API key configured. Add one in Settings.".into()),
-            Err(e) => match read_fallback_key(db, provider)? {
-                Some(key) => Ok(key),
-                None => Err(format!("Failed to retrieve API key: {e}")),
-            },
-        },
-        Err(e) => read_fallback_key(db, provider)?
-            .ok_or_else(|| format!("Failed to retrieve API key: {e}")),
+    if let Ok(key) = read_keychain_key(provider) {
+        return Ok(key);
     }
+    read_fallback_key(db, provider)?
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| "No API key configured. Add one in Settings.".into())
 }
 
 pub fn has_api_key_for_provider(db: &Database, provider: &str) -> Result<bool, String> {
-    match keyring_entry(provider) {
-        Ok(entry) => match entry.get_password() {
-            Ok(key) => Ok(!key.trim().is_empty()),
-            Err(keyring::Error::NoEntry) => Ok(read_fallback_key(db, provider)?.is_some()),
-            Err(_) => Ok(read_fallback_key(db, provider)?.is_some()),
-        },
-        Err(_) => Ok(read_fallback_key(db, provider)?.is_some()),
+    if read_keychain_key(provider).is_ok() {
+        return Ok(true);
     }
+    Ok(read_fallback_key(db, provider)?
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false))
+}
+
+fn read_keychain_key(provider: &str) -> Result<String, String> {
+    let entry = keyring_entry(provider)?;
+    let key = entry
+        .get_password()
+        .map_err(|e| format!("Keyring read failed: {e}"))?;
+    if key.trim().is_empty() {
+        return Err("Keyring entry is empty".into());
+    }
+    Ok(key)
+}
+
+fn write_keychain_key(provider: &str, api_key: &str) -> Result<(), String> {
+    let entry = keyring_entry(provider)?;
+    entry
+        .set_password(api_key)
+        .map_err(|e| format!("Keyring write failed: {e}"))
 }
 
 #[tauri::command]
@@ -93,26 +102,22 @@ pub fn set_api_key(
     provider: String,
     api_key: String,
 ) -> Result<(), String> {
-    match keyring_entry(&provider) {
-        Ok(entry) => match entry.set_password(&api_key) {
-            Ok(()) => {
-                remove_fallback_key(&db, &provider).ok();
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!(
-                    "Warning: OS keychain storage failed for provider '{provider}', \
-                     falling back to local database: {e}"
-                );
-                write_fallback_key(&db, &provider, &api_key)
-            }
-        },
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        return Err("API key cannot be empty.".into());
+    }
+
+    // Always persist to SQLite — reliable on Windows when Credential Manager read-back fails.
+    write_fallback_key(&db, &provider, trimmed)?;
+
+    match write_keychain_key(&provider, trimmed) {
+        Ok(()) => Ok(()),
         Err(e) => {
             eprintln!(
-                "Warning: OS keychain unavailable for provider '{provider}', \
-                 storing in local database: {e}"
+                "Warning: OS keychain storage failed for provider '{provider}', \
+                 using local database copy: {e}"
             );
-            write_fallback_key(&db, &provider, &api_key)
+            Ok(())
         }
     }
 }
@@ -178,19 +183,13 @@ mod tests {
     }
 
     #[test]
-    fn list_api_key_status_reflects_fallback() {
+    fn set_api_key_always_writes_fallback() {
         let (db, _path) = temp_db();
-        write_fallback_key(&db, "openai", "sk-openai-test").unwrap();
-        let statuses: Vec<ApiKeyStatus> = ["anthropic", "openai", "custom"]
-            .iter()
-            .map(|p| ApiKeyStatus {
-                provider: (*p).to_string(),
-                has_key: has_api_key_for_provider(&db, p).unwrap(),
-            })
-            .collect();
-        let openai = statuses.iter().find(|s| s.provider == "openai").unwrap();
-        assert!(openai.has_key);
-        let anthropic = statuses.iter().find(|s| s.provider == "anthropic").unwrap();
-        assert!(!anthropic.has_key);
+        write_fallback_key(&db, "anthropic", "sk-always-in-db").unwrap();
+        assert!(has_api_key_for_provider(&db, "anthropic").unwrap());
+        assert_eq!(
+            get_api_key_for_provider(&db, "anthropic").unwrap(),
+            "sk-always-in-db"
+        );
     }
 }

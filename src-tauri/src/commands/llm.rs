@@ -1,6 +1,7 @@
 use crate::commands::keys::get_api_key_for_provider;
 use crate::db::Database;
 use reqwest::blocking::Client;
+use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::State;
@@ -69,7 +70,10 @@ fn complete_anthropic(input: &CompleteLlmInput, api_key: &str) -> Result<String,
         body["temperature"] = json!(temp);
     }
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
     let response = client
         .post("https://api.anthropic.com/v1/messages")
         .header("Content-Type", "application/json")
@@ -107,6 +111,10 @@ fn complete_anthropic(input: &CompleteLlmInput, api_key: &str) -> Result<String,
         .collect::<Vec<_>>()
         .join("");
 
+    if joined.trim().is_empty() {
+        return Err("Anthropic returned an empty response".into());
+    }
+
     if input.json_mode.unwrap_or(false) {
         Ok(extract_json(&joined))
     } else {
@@ -138,7 +146,10 @@ fn complete_openai(input: &CompleteLlmInput, api_key: &str) -> Result<String, St
         body["response_format"] = json!({ "type": "json_object" });
     }
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
     let response = client
         .post(base_url)
         .header("Content-Type", "application/json")

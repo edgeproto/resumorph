@@ -5,7 +5,7 @@ import type { AppSettings, LlmProviderId } from "./types";
 
 const DEFAULTS: AppSettings = {
   defaultProvider: "anthropic",
-  defaultModelAnthropic: "claude-sonnet-4-20250514",
+  defaultModelAnthropic: "claude-sonnet-4-6",
   defaultModelOpenai: "gpt-4o",
   defaultModelCustom: "gpt-4o",
   customBaseUrl: "http://localhost:11434/v1/chat/completions",
@@ -17,9 +17,20 @@ const DEFAULTS: AppSettings = {
 function parseSettingsMap(
   map: Record<string, string>,
 ): AppSettings {
+  const retiredAnthropic = new Set([
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4-0",
+    "claude-sonnet-4",
+    "claude-opus-4-20250514",
+  ]);
+  const anthropicModel =
+    map.default_model_anthropic ?? DEFAULTS.defaultModelAnthropic;
+
   return {
     defaultProvider: (map.default_provider as LlmProviderId) ?? DEFAULTS.defaultProvider,
-    defaultModelAnthropic: map.default_model_anthropic ?? DEFAULTS.defaultModelAnthropic,
+    defaultModelAnthropic: retiredAnthropic.has(anthropicModel)
+      ? DEFAULTS.defaultModelAnthropic
+      : anthropicModel,
     defaultModelOpenai: map.default_model_openai ?? DEFAULTS.defaultModelOpenai,
     defaultModelCustom: map.default_model_custom ?? DEFAULTS.defaultModelCustom,
     customBaseUrl: map.custom_base_url ?? DEFAULTS.customBaseUrl,

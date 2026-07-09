@@ -15,7 +15,7 @@ export const anthropicProvider: LLMProvider = {
       }));
 
     const body: Record<string, unknown> = {
-      model: options.model || "claude-sonnet-4-20250514",
+      model: options.model || "claude-sonnet-4-6",
       max_tokens: 8192,
       messages: chatMessages,
     };

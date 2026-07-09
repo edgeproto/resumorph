@@ -28,7 +28,11 @@ import {
   COVER_LETTER_USER_PROMPT,
   findLatestExportable,
 } from "../lib/sessionExport";
-import { modelForProvider, useAppSettings } from "../lib/settings";
+import {
+  DEFAULT_SETTINGS,
+  modelForProvider,
+  useAppSettings,
+} from "../lib/settings";
 import type {
   LlmProviderId,
   ParsedJobDescription,
@@ -37,6 +41,32 @@ import type {
   Session,
 } from "../lib/types";
 import type { ExportKind } from "../components/ExportDialog";
+
+const RETIRED_ANTHROPIC_MODELS = new Set([
+  "claude-sonnet-4-20250514",
+  "claude-sonnet-4-0",
+  "claude-sonnet-4",
+  "claude-opus-4-20250514",
+]);
+
+function formatLlmError(error: unknown): string {
+  const raw =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : "Request failed";
+
+  if (
+    raw.includes("claude-sonnet-4-20250514") ||
+    raw.includes("model_not_found") ||
+    raw.includes("not_found_error")
+  ) {
+    return `${raw} — Update Settings → LLM defaults → Anthropic model to claude-sonnet-4-6.`;
+  }
+
+  return raw;
+}
 
 function parseSessionResume(session: Session | undefined): ParsedResume | null {
   if (!session?.resumeJson) return null;
@@ -117,7 +147,7 @@ export function SessionWorkspace() {
     useState(false);
   const [additionalInstructions, setAdditionalInstructions] = useState("");
   const [provider, setProvider] = useState<LlmProviderId>("anthropic");
-  const [model, setModel] = useState("claude-sonnet-4-20250514");
+  const [model, setModel] = useState(DEFAULT_SETTINGS.defaultModelAnthropic);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,7 +201,12 @@ export function SessionWorkspace() {
   useEffect(() => {
     if (settings) {
       setProvider(settings.defaultProvider);
-      setModel(modelForProvider(settings, settings.defaultProvider));
+      const nextModel = modelForProvider(settings, settings.defaultProvider);
+      setModel(
+        RETIRED_ANTHROPIC_MODELS.has(nextModel)
+          ? DEFAULT_SETTINGS.defaultModelAnthropic
+          : nextModel,
+      );
     }
   }, [settings]);
 
@@ -306,6 +341,14 @@ export function SessionWorkspace() {
       return;
     }
 
+    const hasKey = await api.hasApiKey(provider);
+    if (!hasKey) {
+      setError(
+        `No API key for ${provider}. Open Settings → API keys, save your key, then try again.`,
+      );
+      return;
+    }
+
     const question =
       action === "qa"
         ? userText
@@ -379,6 +422,12 @@ export function SessionWorkspace() {
         },
       );
 
+      if (!response.trim()) {
+        throw new Error(
+          "The model returned an empty response. Check Settings for a valid API key and model.",
+        );
+      }
+
       await api.createMessage({
         sessionId,
         role: "assistant",
@@ -399,7 +448,7 @@ export function SessionWorkspace() {
         }
       }
     } catch (e) {
-      setError((e as Error).message);
+      setError(formatLlmError(e));
     } finally {
       setLoading(false);
     }
@@ -515,6 +564,11 @@ export function SessionWorkspace() {
       )}
 
       <div className="gpt-thread">
+        {error && workspaceReady && (
+          <div className="gpt-error-banner error" role="alert">
+            {error}
+          </div>
+        )}
         {!profileId && (
           <div className="gpt-empty">
             <h1>Welcome to Resumorph</h1>

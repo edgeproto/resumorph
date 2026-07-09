@@ -83,6 +83,7 @@ impl Database {
 
         seed_default_settings(&conn)?;
         migrate_default_prompts(&conn)?;
+        migrate_retired_anthropic_models(&conn)?;
         migrate_sessions_resume_json(&conn)?;
         migrate_sessions_chat_type(&conn)?;
 
@@ -291,10 +292,38 @@ fn upsert_default_preset(
     Ok(())
 }
 
+fn migrate_retired_anthropic_models(conn: &Connection) -> SqlResult<()> {
+    const CURRENT: &str = "claude-sonnet-4-6";
+    const RETIRED: &[&str] = &[
+        "claude-sonnet-4-20250514",
+        "claude-sonnet-4-0",
+        "claude-sonnet-4",
+        "claude-opus-4-20250514",
+    ];
+
+    let current: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'default_model_anthropic'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if let Some(model) = current {
+        if RETIRED.iter().any(|r| *r == model.as_str()) {
+            conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'default_model_anthropic'",
+                [CURRENT],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn seed_default_settings(conn: &Connection) -> SqlResult<()> {
     let defaults = [
         ("default_provider", "anthropic"),
-        ("default_model_anthropic", "claude-sonnet-4-20250514"),
+        ("default_model_anthropic", "claude-sonnet-4-6"),
         ("default_model_openai", "gpt-4o"),
         ("default_model_custom", "gpt-4o"),
         ("custom_base_url", "http://localhost:11434/v1/chat/completions"),

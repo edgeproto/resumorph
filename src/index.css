@@ -649,6 +649,17 @@ body {
   margin: 0.5rem auto 0;
 }
 
+.gpt-error-banner {
+  max-width: 768px;
+  margin: 0 auto 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .gpt-spinner {
   display: inline-block;
   width: 14px;
