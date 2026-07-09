@@ -3,7 +3,7 @@ import { useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import { CreateProfileModal } from "./CreateProfileModal";
 import { api, parseProfileResume } from "../lib/api";
-import { sessionLabel } from "../lib/sessions";
+import { sessionDate, sessionTitle } from "../lib/sessions";
 
 const navItems = [
   { to: "/profiles", label: "Profiles", icon: "👤" },
@@ -129,7 +129,10 @@ export function Sidebar() {
                     to={`/?profile=${profileId}&session=${s.id}`}
                     className={`gpt-history-item${activeSessionId === s.id ? " active" : ""}`}
                   >
-                    {sessionLabel(s)}
+                    <span className="gpt-history-item-inner">
+                      <span className="gpt-history-item-title">{sessionTitle(s)}</span>
+                      <span className="gpt-history-item-date">{sessionDate(s)}</span>
+                    </span>
                   </NavLink>
                 </li>
               ))}

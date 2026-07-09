@@ -1,7 +1,7 @@
 import type { Session } from "./types";
 import { jdLabel } from "./jd";
 
-export function sessionLabel(session: Session): string {
+export function sessionTitle(session: Session): string {
   if (session.jobTitle && session.company) {
     return `${session.jobTitle} @ ${session.company}`;
   }
@@ -15,5 +15,18 @@ export function sessionLabel(session: Session): string {
       sourceType: "text",
     }).slice(0, 42);
   }
+  return "Untitled session";
+}
+
+export function sessionDate(session: Session): string {
+  return new Date(session.createdAt).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function sessionLabel(session: Session): string {
+  const title = sessionTitle(session);
+  if (title !== "Untitled session") return title;
   return new Date(session.createdAt).toLocaleDateString();
 }
