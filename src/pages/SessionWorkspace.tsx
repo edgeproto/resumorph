@@ -8,6 +8,8 @@ import { ResumeInput } from "../components/ResumeInput";
 import { api, parseProfileResume } from "../lib/api";
 import {
   actionUserMessage,
+  displayUserMessage,
+  inferActionFromContext,
   type SessionAction,
 } from "../lib/chatTypes";
 import {
@@ -121,6 +123,9 @@ export function SessionWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [exportKind, setExportKind] = useState<ExportKind>("resume");
+  const [exportTailored, setExportTailored] = useState<TailoredResume | undefined>();
+  const [exportCoverLetter, setExportCoverLetter] = useState<string | undefined>();
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   const { data: profiles = [] } = useQuery({
     queryKey: ["profiles"],
@@ -277,12 +282,16 @@ export function SessionWorkspace() {
     text?: string;
     useAdditionalInstructions?: boolean;
   }) {
-    const action = options.action ?? "qa";
     const userText = options.text?.trim() ?? "";
+    const explicitAction = options.action;
+    const action =
+      explicitAction ??
+      (userText ? inferActionFromContext(messages, userText) : "qa");
     const extra =
       options.useAdditionalInstructions && action !== "qa"
         ? additionalInstructions
         : undefined;
+    const isButtonAction = explicitAction !== undefined && explicitAction !== "qa";
 
     if (!profileId) {
       setError("Select a profile in the sidebar first");
@@ -300,7 +309,9 @@ export function SessionWorkspace() {
     const question =
       action === "qa"
         ? userText
-        : actionUserMessage(action, extra);
+        : isButtonAction
+          ? actionUserMessage(action, extra)
+          : userText;
 
     if (!question) return;
 
@@ -344,6 +355,11 @@ export function SessionWorkspace() {
       }));
 
       const jsonMode = action === "tailor" || action === "cover_letter";
+      const llmUserContent = isButtonAction
+        ? interpolatePrompt(userPrompt, context)
+        : action === "qa"
+          ? interpolatePrompt(userPrompt, context)
+          : question;
 
       const response = await completeWithProvider(
         provider,
@@ -352,7 +368,7 @@ export function SessionWorkspace() {
           ...history,
           {
             role: "user",
-            content: interpolatePrompt(userPrompt, context),
+            content: llmUserContent,
           },
         ],
         {
@@ -389,16 +405,31 @@ export function SessionWorkspace() {
     }
   }
 
+  async function copyText(text: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback(key);
+      setTimeout(() => setCopyFeedback(null), 2000);
+    } catch {
+      setError("Could not copy to clipboard");
+    }
+  }
+
   function handleAction(action: SessionAction) {
     void sendMessage({ action, useAdditionalInstructions: true });
   }
 
   function handleSend() {
-    void sendMessage({ action: "qa", text: input });
+    void sendMessage({ text: input });
   }
 
-  function openExport(kind: ExportKind) {
+  function openExport(
+    kind: ExportKind,
+    content?: { tailored?: TailoredResume; coverLetter?: string },
+  ) {
     setExportKind(kind);
+    setExportTailored(content?.tailored);
+    setExportCoverLetter(content?.coverLetter);
     setShowExport(true);
   }
 
@@ -547,11 +578,18 @@ export function SessionWorkspace() {
           }
 
           const displayContent =
+            m.role === "user"
+              ? displayUserMessage(m.content)
+              : tailored && (tailored.summary || tailored.experience)
+                ? "Here's your tailored resume:"
+                : coverPreview
+                  ? "Here's your cover letter:"
+                  : m.content;
+
+          const resumePreviewText =
             tailored && (tailored.summary || tailored.experience)
-              ? "Here's your tailored resume:"
-              : coverPreview
-                ? "Here's your cover letter:"
-                : m.content;
+              ? tailoredToPreviewText(tailored)
+              : null;
 
           return (
             <ChatMessage
@@ -559,13 +597,51 @@ export function SessionWorkspace() {
               role={m.role as "user" | "assistant"}
               content={displayContent}
             >
-              {tailored && (tailored.summary || tailored.experience) && (
-                <pre className="output preview-content">
-                  {tailoredToPreviewText(tailored)}
-                </pre>
+              {resumePreviewText && (
+                <div className="gpt-output-card">
+                  <pre className="output preview-content">{resumePreviewText}</pre>
+                  <div className="gpt-output-actions">
+                    <button
+                      type="button"
+                      className="gpt-output-btn"
+                      onClick={() => void copyText(resumePreviewText, `${m.id}-resume`)}
+                    >
+                      {copyFeedback === `${m.id}-resume` ? "Copied" : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      className="gpt-output-btn"
+                      onClick={() =>
+                        openExport("resume", { tailored: tailored ?? undefined })
+                      }
+                    >
+                      Export
+                    </button>
+                  </div>
+                </div>
               )}
               {coverPreview && !tailored && (
-                <pre className="output preview-content">{coverPreview}</pre>
+                <div className="gpt-output-card">
+                  <pre className="output preview-content">{coverPreview}</pre>
+                  <div className="gpt-output-actions">
+                    <button
+                      type="button"
+                      className="gpt-output-btn"
+                      onClick={() => void copyText(coverPreview, `${m.id}-cover`)}
+                    >
+                      {copyFeedback === `${m.id}-cover` ? "Copied" : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      className="gpt-output-btn"
+                      onClick={() =>
+                        openExport("cover_letter", { coverLetter: coverPreview })
+                      }
+                    >
+                      Export
+                    </button>
+                  </div>
+                </div>
               )}
             </ChatMessage>
           );
@@ -631,17 +707,22 @@ export function SessionWorkspace() {
       {showExport && profileId && (
         <ExportDialog
           profileId={profileId}
-          tailored={exportable.tailored ?? undefined}
-          coverLetter={exportable.coverLetter ?? undefined}
+          tailored={exportTailored ?? exportable.tailored ?? undefined}
+          coverLetter={exportCoverLetter ?? exportable.coverLetter ?? undefined}
           exportKind={
-            exportKind === "cover_letter" && canExportCoverLetter
+            exportKind === "cover_letter" &&
+            (exportCoverLetter ?? exportable.coverLetter)
               ? "cover_letter"
-              : canExportResume
+              : exportTailored ?? exportable.tailored
                 ? "resume"
                 : "cover_letter"
           }
           sessionId={sessionId || undefined}
-          onClose={() => setShowExport(false)}
+          onClose={() => {
+            setShowExport(false);
+            setExportTailored(undefined);
+            setExportCoverLetter(undefined);
+          }}
         />
       )}
     </div>

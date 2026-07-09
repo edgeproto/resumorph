@@ -1,7 +1,6 @@
 import type { Message } from "./types";
 import type { TailoredResume } from "./docx";
 import { parseTailoredJson } from "./docx";
-import type { SessionAction } from "./chatTypes";
 
 export interface ExportableContent {
   tailored: TailoredResume | null;
@@ -45,14 +44,6 @@ export function findLatestExportable(messages: Message[]): ExportableContent {
   }
 
   return { tailored, coverLetter };
-}
-
-/** @deprecated Pass messages only; action is ignored */
-export function findLatestExportableForAction(
-  messages: Message[],
-  _action?: SessionAction,
-): ExportableContent {
-  return findLatestExportable(messages);
 }
 
 export const COVER_LETTER_SYSTEM_PROMPT = `You are an expert cover letter writer for job applications.
