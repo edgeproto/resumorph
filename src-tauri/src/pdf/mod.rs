@@ -46,9 +46,9 @@ $word = New-Object -ComObject Word.Application
 $word.Visible = $false
 try {{
     $doc = $word.Documents.Open('{docx}')
-    $wdFormatPDF = 17
-    $doc.SaveAs([ref]'{pdf}', [ref]$wdFormatPDF)
-    $doc.Close()
+    $wdExportFormatPDF = 17
+    $doc.ExportAsFixedFormat('{pdf}', $wdExportFormatPDF)
+    $doc.Close([ref]0)
 }} finally {{
     $word.Quit()
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null

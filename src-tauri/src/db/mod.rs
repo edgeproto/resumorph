@@ -109,9 +109,15 @@ Rules:\n\
 - For the three most recent roles, write 5–6 accomplishment bullets each. For older roles, write 3–4 bullets.\n\
 - Show career progression and increasing scope where the resume supports it.\n\
 - Be specific and concrete; avoid generic filler and buzzword soup.\n\
-- Sound like a skilled human writer, not generic AI output.\n\n\
-Output: Respond with valid JSON only—no markdown, no commentary. Keys: name, contact, summary, \
-experience (array of {title, company, dates optional, bullets as string array}), skills, education.";
+- Sound like a skilled human writer, not generic AI output.\n\
+- ALWAYS include every field below. Copy name, contact, employment dates, and skills from the source resume when not being rewritten.\n\n\
+Output: Respond with valid JSON only—no markdown, no commentary. Required keys:\n\
+- name (string)\n\
+- contact (string: email, phone, location, LinkedIn — from source resume)\n\
+- summary (string)\n\
+- experience (array of {title, company, dates, bullets[]}) — dates REQUIRED for each role\n\
+- skills (string or string[] — include all relevant skills from source + JD)\n\
+- education (string or array of {degree, school, year})";
 
 const DEFAULT_TAILOR_USER: &str = "Tailor this resume for the target role.\n\n\
 Profile: {{profile_name}}\n\
@@ -212,7 +218,7 @@ fn migrate_sessions_chat_type(conn: &Connection) -> SqlResult<()> {
 }
 
 fn migrate_default_prompts(conn: &Connection) -> SqlResult<()> {
-    const PROMPTS_VERSION: &str = "2";
+    const PROMPTS_VERSION: &str = "3";
 
     let version: Option<String> = conn
         .query_row(

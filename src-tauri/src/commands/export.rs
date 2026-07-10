@@ -216,6 +216,53 @@ pub fn inject_docx_placeholders(
 }
 
 #[tauri::command]
+pub fn ensure_profile_export_template(
+    app: AppHandle,
+    db: State<'_, Database>,
+    profile_id: String,
+) -> Result<String, String> {
+    let (source_type, template_path): (String, Option<String>) = db
+        .with_conn(|conn| {
+            conn.query_row(
+                "SELECT source_type, template_path FROM profiles WHERE id = ?1",
+                [&profile_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+        })
+        .map_err(|e| e.to_string())?;
+
+    if source_type != "docx" {
+        return Err(
+            "Export requires a DOCX resume. Open Profiles and upload your .docx file to keep your original formatting.".into(),
+        );
+    }
+
+    let template_path = template_path.ok_or("Profile has no resume file on disk")?;
+    let source = PathBuf::from(&template_path);
+    if !source.exists() {
+        return Err("Resume file not found. Re-upload your .docx in Profiles.".into());
+    }
+
+    let dest_dir = profile_dir(&app, &profile_id)?;
+    let export_template = dest_dir.join("export-template.docx");
+    crate::docx::prepare_export_template(&source, &export_template)
+        .map_err(|e| format!("Failed to prepare export template: {e}"))?;
+
+    let dest_str = export_template.to_string_lossy().into_owned();
+    let now = chrono::Utc::now().to_rfc3339();
+    db.with_conn(|conn| {
+        conn.execute(
+            "UPDATE profiles SET template_path = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![&dest_str, &now, &profile_id],
+        )?;
+        Ok(())
+    })
+    .map_err(|e| e.to_string())?;
+
+    Ok(dest_str)
+}
+
+#[tauri::command]
 pub fn convert_docx_to_pdf(
     docx_path: String,
     converter: Option<String>,

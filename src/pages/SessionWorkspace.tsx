@@ -13,6 +13,7 @@ import {
   type SessionAction,
 } from "../lib/chatTypes";
 import {
+  mergeTailoredWithResume,
   tailoredToPreviewText,
   parseTailoredJson,
   type TailoredResume,
@@ -20,6 +21,7 @@ import {
 import { completeWithProvider } from "../lib/llm";
 import {
   buildPromptContext,
+  DEFAULT_PLACEHOLDER_KEYS,
   getDefaultPreset,
   interpolatePrompt,
 } from "../lib/prompts";
@@ -167,7 +169,12 @@ export function SessionWorkspace() {
     queryFn: api.listPromptPresets,
   });
 
-  const { data: session } = useQuery({
+  const {
+    data: session,
+    isLoading: sessionLoading,
+    isError: sessionError,
+    error: sessionQueryError,
+  } = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => api.getSession(sessionId),
     enabled: !!sessionId,
@@ -185,6 +192,21 @@ export function SessionWorkspace() {
     : null;
   const activeResume = sessionResume ?? profileResume;
 
+  const { data: templatePlaceholders = [] } = useQuery({
+    queryKey: ["placeholders", selectedProfile?.templatePath],
+    queryFn: () =>
+      selectedProfile?.templatePath
+        ? api.detectDocxPlaceholders(selectedProfile.templatePath)
+        : [],
+    enabled:
+      !!selectedProfile?.templatePath && selectedProfile.sourceType === "docx",
+  });
+
+  function withSourceResume(tailored: TailoredResume | null | undefined) {
+    if (!tailored) return undefined;
+    return mergeTailoredWithResume(tailored, activeResume);
+  }
+
   const exportable = useMemo(
     () => findLatestExportable(messages),
     [messages],
@@ -194,9 +216,18 @@ export function SessionWorkspace() {
   const canExportCoverLetter = !!exportable.coverLetter;
   const canExport = canExportResume || canExportCoverLetter;
 
-  const workspaceReady = !!profileId && !!jd && !!activeResume && !!sessionId;
-  const showJdGate = !!profileId && !jd;
-  const showResumeGate = !!profileId && !!jd && !activeResume;
+  const sessionHydrating = !!sessionId && sessionLoading;
+  const workspaceReady =
+    !!profileId && !!jd && !!activeResume && !!sessionId && !sessionHydrating;
+  const showSessionLoading = !!profileId && sessionHydrating;
+  const showJdGate =
+    !!profileId && !jd && !showSessionLoading && !sessionError;
+  const showResumeGate =
+    !!profileId && !!jd && !activeResume && !showSessionLoading;
+  const showSessionLoadError =
+    !!profileId && !!sessionId && sessionError && !sessionHydrating;
+  const showAwaitingSession =
+    !!profileId && !!jd && !!activeResume && !sessionId;
 
   useEffect(() => {
     if (settings) {
@@ -211,22 +242,27 @@ export function SessionWorkspace() {
   }, [settings]);
 
   useEffect(() => {
-    if (session) {
-      if (session.jobDescription) {
-        setJd({
-          text: session.jobDescription,
-          jobTitle: session.jobTitle,
-          company: session.company,
-          sourceType: "text",
-        });
-      } else {
-        setJd(null);
-      }
-      setSessionResume(parseSessionResume(session));
-    } else if (!sessionId) {
+    if (!sessionId) {
       setJd(null);
       setSessionResume(null);
+      return;
     }
+
+    if (!session) {
+      return;
+    }
+
+    if (session.jobDescription) {
+      setJd({
+        text: session.jobDescription,
+        jobTitle: session.jobTitle,
+        company: session.company,
+        sourceType: "text",
+      });
+    } else {
+      setJd(null);
+    }
+    setSessionResume(parseSessionResume(session));
   }, [session, sessionId]);
 
   useEffect(() => {
@@ -382,6 +418,11 @@ export function SessionWorkspace() {
           jobTitle: jd.jobTitle ?? "",
           company: jd.company ?? "",
           userQuestion: question,
+          placeholderKeys: (
+            templatePlaceholders.length
+              ? templatePlaceholders
+              : DEFAULT_PLACEHOLDER_KEYS
+          ).join(", "),
         },
       );
 
@@ -477,7 +518,7 @@ export function SessionWorkspace() {
     content?: { tailored?: TailoredResume; coverLetter?: string },
   ) {
     setExportKind(kind);
-    setExportTailored(content?.tailored);
+    setExportTailored(withSourceResume(content?.tailored));
     setExportCoverLetter(content?.coverLetter);
     setShowExport(true);
   }
@@ -579,6 +620,37 @@ export function SessionWorkspace() {
           </div>
         )}
 
+        {showSessionLoading && (
+          <div className="gpt-empty">
+            <p className="muted">Loading session…</p>
+          </div>
+        )}
+
+        {showSessionLoadError && (
+          <div className="gpt-empty gpt-gate">
+            <h1>Could not open session</h1>
+            <p className="error">
+              {formatLlmError(sessionQueryError)}
+            </p>
+            <p className="muted">
+              The session may have been deleted. Start a new session from the
+              sidebar.
+            </p>
+          </div>
+        )}
+
+        {showAwaitingSession && (
+          <div className="gpt-empty gpt-gate">
+            <h1>{selectedProfile?.name ?? "Session"}</h1>
+            <p className="muted">
+              Add a job description to create a session and continue.
+            </p>
+            <div className="gpt-gate-card">
+              <JobDescriptionInput value={jd} onChange={handleJdChange} />
+            </div>
+          </div>
+        )}
+
         {showJdGate && (
           <div className="gpt-empty gpt-gate">
             <h1>{selectedProfile?.name ?? "New session"}</h1>
@@ -621,13 +693,14 @@ export function SessionWorkspace() {
           </div>
         )}
 
-        {messages.map((m) => {
+        {workspaceReady &&
+          messages.map((m) => {
           let tailored: TailoredResume | null = null;
           let coverPreview: string | null = null;
 
           if (m.role === "assistant") {
             const parsed = parseAssistantOutput(m.content);
-            tailored = parsed.tailored;
+            tailored = withSourceResume(parsed.tailored) ?? null;
             coverPreview = parsed.coverPreview;
           }
 
@@ -699,9 +772,9 @@ export function SessionWorkspace() {
               )}
             </ChatMessage>
           );
-        })}
+          })}
 
-        {loading && (
+        {loading && workspaceReady && (
           <ChatMessage role="assistant" content="">
             <span className="gpt-typing">Thinking...</span>
           </ChatMessage>
@@ -761,13 +834,13 @@ export function SessionWorkspace() {
       {showExport && profileId && (
         <ExportDialog
           profileId={profileId}
-          tailored={exportTailored ?? exportable.tailored ?? undefined}
+          tailored={exportTailored ?? withSourceResume(exportable.tailored)}
           coverLetter={exportCoverLetter ?? exportable.coverLetter ?? undefined}
           exportKind={
             exportKind === "cover_letter" &&
             (exportCoverLetter ?? exportable.coverLetter)
               ? "cover_letter"
-              : exportTailored ?? exportable.tailored
+              : exportTailored ?? withSourceResume(exportable.tailored)
                 ? "resume"
                 : "cover_letter"
           }

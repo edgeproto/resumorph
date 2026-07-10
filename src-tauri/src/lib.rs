@@ -19,9 +19,9 @@ use commands::prompt_presets::{
     update_prompt_preset,
 };
 use commands::export::{
-    convert_docx_to_pdf, create_output, detect_docx_placeholders, get_builtin_template_path,
-    get_output, inject_docx_placeholders, list_builtin_templates, list_outputs, read_file_bytes,
-    save_export_file,
+    convert_docx_to_pdf, create_output, detect_docx_placeholders, ensure_profile_export_template,
+    get_builtin_template_path, get_output, inject_docx_placeholders, list_builtin_templates,
+    list_outputs, read_file_bytes, save_export_file,
 };
 use commands::jd::{parse_jd_from_file, parse_jd_from_text, pick_and_parse_jd};
 use commands::resume::{get_profile_resume_text, ingest_resume_file, pick_and_ingest_resume};
@@ -87,6 +87,7 @@ pub fn run() {
             get_builtin_template_path,
             list_builtin_templates,
             inject_docx_placeholders,
+            ensure_profile_export_template,
             convert_docx_to_pdf,
             create_output,
             get_output,

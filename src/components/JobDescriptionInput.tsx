@@ -17,14 +17,17 @@ export function JobDescriptionInput({
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsing, setParsing] = useState(false);
   const [draftText, setDraftText] = useState("");
-  const [editing, setEditing] = useState(true);
+  const [editing, setEditing] = useState(!value);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (value && !editing) {
+    if (value && compact) {
+      setEditing(false);
+      setDraftText(value.text);
+    } else if (value && !editing) {
       setDraftText(value.text);
     }
-  }, [value, editing]);
+  }, [value, compact, editing]);
 
   async function commitDraft(text: string) {
     if (!text.trim()) {

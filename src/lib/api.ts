@@ -239,6 +239,10 @@ export const api = {
     isTauri()
       ? invoke<string>("inject_docx_placeholders", { profileId, placeholders })
       : Promise.reject(new Error("Not available in browser preview")),
+  ensureProfileExportTemplate: (profileId: string) =>
+    isTauri()
+      ? invoke<string>("ensure_profile_export_template", { profileId })
+      : Promise.reject(new Error("Export requires the desktop app")),
   convertDocxToPdf: (docxPath: string, converter?: string) =>
     isTauri()
       ? invoke<string>("convert_docx_to_pdf", {

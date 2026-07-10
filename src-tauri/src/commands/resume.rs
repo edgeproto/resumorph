@@ -65,7 +65,16 @@ pub async fn ingest_resume_file(
     let parsed = parse_sections(&text);
     let parsed_json = serde_json::to_string(&parsed).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let stored_path_str = stored_path.to_string_lossy().into_owned();
+
+    let template_path_str = if source_type == "docx" {
+        let dest_dir = profile_dir(&app, &profile_id)?;
+        let export_template = dest_dir.join("export-template.docx");
+        crate::docx::prepare_export_template(&stored_path, &export_template)
+            .map_err(|e| format!("Failed to prepare export template: {e}"))?;
+        export_template.to_string_lossy().into_owned()
+    } else {
+        stored_path.to_string_lossy().into_owned()
+    };
 
     db.with_conn(|conn| {
         conn.execute(
@@ -73,7 +82,7 @@ pub async fn ingest_resume_file(
              parsed_json = ?3, updated_at = ?4 WHERE id = ?5",
             rusqlite::params![
                 &source_type,
-                &stored_path_str,
+                &template_path_str,
                 &parsed_json,
                 &now,
                 &profile_id
@@ -107,7 +116,7 @@ pub async fn ingest_resume_file(
     Ok(IngestResult {
         profile,
         parsed,
-        stored_path: stored_path_str.clone(),
+        stored_path: template_path_str.clone(),
     })
 }
 
